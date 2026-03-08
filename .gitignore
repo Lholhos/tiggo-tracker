@@ -1,0 +1,23 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database (contains scraped data, not source code)
+tracker.db
+
+# Debug / scratch files
+debug*.html
+debug*.png
+single_listing.html
+tile.html
+debug_scrape.py
+dump_single.py
+dump_tile.py
+inspect_dom.py
+test_single.py
+
+# macOS
+.DS_Store
