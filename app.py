@@ -1,5 +1,5 @@
 """
-Flask backend for the Tiggo 8 Pro price tracker.
+Flask backend for the DealRadar price tracker.
 Runs on http://localhost:5000
 """
 
@@ -183,7 +183,7 @@ HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tiggo 8 Pro · Price Tracker</title>
+<title>DealRadar</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
@@ -571,16 +571,20 @@ HTML = """<!DOCTYPE html>
   .empty-state .icon { font-size: 40px; margin-bottom: 16px; }
   .empty-state .msg { font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; }
   .empty-state .sub { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  
+  .age-old { font-weight: bold; color: var(--gold); }
 </style>
 </head>
 <body>
 
 <div class="header">
   <div class="header-brand">
-    <span class="wordmark">TIGGO 8 PRO</span>
+    <span class="wordmark">DEALRADAR</span>
     <span class="subtitle">Price Intelligence · 2022–2024</span>
   </div>
-  <span class="header-badge">autotrader.co.za</span>
+  <div style="display:flex;gap:12px;align-items:center">
+    <span id="velocity-badge" class="header-badge" style="display:none;font-weight:bold"></span>
+  </div>
 </div>
 
 <!-- Stats Bar -->
@@ -589,7 +593,15 @@ HTML = """<!DOCTYPE html>
   <div class="stat"><div class="stat-label">Lowest</div><div class="stat-value green" id="stat-min">—</div></div>
   <div class="stat"><div class="stat-label">Average</div><div class="stat-value gold" id="stat-avg">—</div></div>
   <div class="stat"><div class="stat-label">Highest</div><div class="stat-value red" id="stat-max">—</div></div>
-  <div class="stat"><div class="stat-label">Last Scraped</div><div class="stat-value" style="font-size:13px;color:var(--muted)" id="stat-last">Never</div></div>
+  <div class="stat"><div class="stat-label">Best Day (New)</div><div class="stat-value" style="font-size:13px;color:var(--text)" id="stat-best-new">—</div></div>
+  <div class="stat"><div class="stat-label">Best Day (Drop)</div><div class="stat-value" style="font-size:13px;color:var(--green)" id="stat-best-drop">—</div></div>
+  <div class="stat" style="display:none"><div class="stat-label">Last Scraped</div><div class="stat-value" style="font-size:13px;color:var(--muted)" id="stat-last">Never</div></div>
+</div>
+
+<div id="market-insights" style="margin:0 auto 16px auto; max-width:1200px; padding:0 24px; font-size:12px; color:var(--muted); display:flex; justify-content:flex-end;">
+  <span id="mileage-sweet-spot" style="background:var(--card); padding:4px 10px; border-radius:4px; border:1px solid var(--border); display:none">
+    <i class="icon" style="color:var(--gold)">⚡</i> <span id="mss-text"></span>
+  </span>
 </div>
 
 <div class="main">
@@ -615,6 +627,7 @@ HTML = """<!DOCTYPE html>
   <!-- Tabs -->
   <div class="tabs">
     <button class="tab-btn active" onclick="setTab('listings', this)">Listings</button>
+    <button class="tab-btn" onclick="setTab('dealers', this)">Dealers</button>
     <button class="tab-btn" onclick="setTab('charts', this)">Charts</button>
     <button class="tab-btn" onclick="setTab('runs', this)">Scrape History</button>
   </div>
@@ -646,8 +659,9 @@ HTML = """<!DOCTYPE html>
             <th class="sortable" onclick="setSort('title')">Listing <span class="sort-icon" id="sort-icon-title"></span></th>
             <th class="sortable" onclick="setSort('source')">Source <span class="sort-icon" id="sort-icon-source"></span></th>
             <th class="sortable" onclick="setSort('price')">Price <span class="sort-icon" id="sort-icon-price"></span></th>
+            <th class="sortable" onclick="setSort('change')">Drop <span class="sort-icon" id="sort-icon-change"></span></th>
             <th class="sortable" onclick="setSort('score')">Score <span class="sort-icon" id="sort-icon-score"></span></th>
-            <th>Vs Avg</th>
+            <th style="width:85px">Neg. Gap</th>
             <th class="sortable" onclick="setSort('mileage')">Mileage <span class="sort-icon" id="sort-icon-mileage"></span></th>
             <th class="sortable" onclick="setSort('year')">Year <span class="sort-icon" id="sort-icon-year"></span></th>
             <th class="sortable" onclick="setSort('location')">Location & Dealer <span class="sort-icon" id="sort-icon-location"></span></th>
@@ -698,15 +712,41 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Dealers Tab -->
+  <div id="tab-dealers" style="display:none">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th>Dealer Name</th>
+            <th style="text-align:right">Active Inv.</th>
+            <th style="text-align:right">Price Drops</th>
+            <th style="text-align:right">Avg. Deviation</th>
+            <th style="text-align:center">Reputation Score</th>
+          </tr>
+        </thead>
+        <tbody id="dealers-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 
 <!-- History Modal -->
 <div class="modal-overlay" id="modal">
-  <div class="modal">
+  <div class="modal" style="width:600px">
     <div class="modal-title" id="modal-title">Price History</div>
     <div class="modal-subtitle" id="modal-subtitle"></div>
     <canvas id="chart-history" height="180"></canvas>
-    <button class="modal-close" onclick="closeModal()">Close</button>
+    
+    <!-- Similar Deals -->
+    <div id="similar-listings-wrap" style="margin-top:24px;display:none;">
+      <div style="font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:12px">Similar Deals</div>
+      <div id="similar-listings" style="display:flex;flex-direction:column;gap:8px"></div>
+    </div>
+    
+    <button class="modal-close" style="margin-top:24px" onclick="closeModal()">Close</button>
   </div>
 </div>
 
@@ -715,8 +755,8 @@ let allListings = [];
 let filterYear = 'all';
 let filterLocation = 'all';
 let filterStatus = 'active';
-let sortKey = 'price';
-let sortAsc = true;
+let sortKey = 'change';
+let sortAsc = false;
 
 function setLocation(val) {
   filterLocation = val;
@@ -750,13 +790,15 @@ const fmtDate = (s) => s ? s.slice(0,16).replace('T',' ') : '—';
 
 // ─── TABS ──────────────────────────────────────────────────────────────────
 function setTab(name, btn) {
-  ['listings','charts','runs'].forEach(t => {
-    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
-  });
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  if (name === 'charts') renderCharts();
+  document.getElementById('tab-listings').style.display = name === 'listings' ? 'block' : 'none';
+  document.getElementById('tab-charts').style.display = name === 'charts' ? 'block' : 'none';
+  document.getElementById('tab-runs').style.display = name === 'runs' ? 'block' : 'none';
+  document.getElementById('tab-dealers').style.display = name === 'dealers' ? 'block' : 'none';
+  if (name === 'charts') setTimeout(renderCharts, 0);
   if (name === 'runs') loadRuns();
+  if (name === 'dealers') renderDealers();
 }
 
 // ─── FILTERS ───────────────────────────────────────────────────────────────
@@ -873,6 +915,7 @@ async function loadListings() {
 
   updateStats();
   renderTable();
+  if (document.getElementById('tab-dealers').style.display === 'block') renderDealers();
 }
 
 function updateStats() {
@@ -885,6 +928,59 @@ function updateStats() {
 
   const dates = allListings.map(l => l.last_seen).filter(Boolean).sort();
   document.getElementById('stat-last').textContent = dates.length ? fmtDate(dates[dates.length-1]) : 'Never';
+
+  // Best Day to Buy logic
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const newCounts = {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+  const dropCounts = {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+
+  allListings.forEach(l => {
+    if (l.first_seen) {
+      newCounts[new Date(l.first_seen).getDay()]++;
+    }
+    if (l.prev_price && l.price < l.prev_price && l.last_seen) {
+      dropCounts[new Date(l.last_seen).getDay()]++;
+    }
+  });
+
+  const bestNewDayNum = Object.keys(newCounts).reduce((a, b) => newCounts[a] > newCounts[b] ? a : b);
+  const bestDropDayNum = Object.keys(dropCounts).reduce((a, b) => dropCounts[a] > dropCounts[b] ? a : b);
+
+  document.getElementById('stat-best-new').textContent = newCounts[bestNewDayNum] > 0 ? days[bestNewDayNum] : '—';
+  document.getElementById('stat-best-drop').textContent = dropCounts[bestDropDayNum] > 0 ? days[bestDropDayNum] : '—';
+
+  // Mileage Sweet Spot
+  const brackets = {};
+  allListings.filter(l => l.is_active && l.price && l.mileage).forEach(l => {
+    const b = Math.floor(l.mileage / 20000) * 20;
+    if (!brackets[b]) brackets[b] = [];
+    brackets[b].push(l.price);
+  });
+  
+  const bKeys = Object.keys(brackets).map(Number).sort((a,b)=>a-b);
+  let maxDrop = 0;
+  let sweetSpot = null;
+  
+  if (bKeys.length > 1) {
+    for (let i = 1; i < bKeys.length; i++) {
+        const prevAvg = brackets[bKeys[i-1]].reduce((a,b)=>a+b,0) / brackets[bKeys[i-1]].length;
+        const curAvg = brackets[bKeys[i]].reduce((a,b)=>a+b,0) / brackets[bKeys[i]].length;
+        const drop = prevAvg - curAvg;
+        // Avoid anomalies where higher mileage costs more
+        if (drop > maxDrop && bKeys[i] <= 100) { // Cap at 100k to avoid 120k+ outliers ruining it
+            maxDrop = drop;
+            sweetSpot = `${bKeys[i-1]}k - ${bKeys[i]}k km (-R${Math.round(drop).toLocaleString()})`;
+        }
+    }
+  }
+
+  const mssEl = document.getElementById('mileage-sweet-spot');
+  if (sweetSpot) {
+    mssEl.style.display = 'inline-block';
+    document.getElementById('mss-text').textContent = `Sweet Spot: ${sweetSpot}`;
+  } else {
+    mssEl.style.display = 'none';
+  }
 }
 
 function getDealScore(l, avgPrice) {
@@ -909,11 +1005,15 @@ function renderTable() {
   if (filterLocation !== 'all') data = data.filter(l => l.location === filterLocation);
 
   // Compute deal score before sorting
-  data.forEach(l => l._dealScore = getDealScore(l, avg));
+  data.forEach(l => {
+    l._dealScore = getDealScore(l, avg);
+    l._priceDrop = (l.prev_price && l.price < l.prev_price) ? (l.prev_price - l.price) : 0;
+  });
 
   data.sort((a, b) => {
     let valA, valB;
     if (sortKey === 'price') { valA = a.price||9e9; valB = b.price||9e9; }
+    else if (sortKey === 'change') { valA = a._priceDrop; valB = b._priceDrop; }
     else if (sortKey === 'mileage') { valA = a.mileage||9e9; valB = b.mileage||9e9; }
     else if (sortKey === 'year') { valA = a.year||0; valB = b.year||0; }
     else if (sortKey === 'score') { valA = a._dealScore; valB = b._dealScore; }
@@ -925,6 +1025,11 @@ function renderTable() {
     
     if (valA < valB) return sortAsc ? -1 : 1;
     if (valA > valB) return sortAsc ? 1 : -1;
+
+    // Fallback sort: if primary fields are equal (e.g. both drops are 0), sort ascending by actual price
+    if (sortKey === 'change') {
+      return (a.price || 9e9) - (b.price || 9e9);
+    }
     return 0;
   });
 
@@ -934,7 +1039,7 @@ function renderTable() {
 
   const tbody = document.getElementById('listings-tbody');
   if (!data.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state">
       <div class="icon">🔍</div>
       <div class="msg">No listings</div>
       <div class="sub">Run a scrape or adjust filters</div>
@@ -980,13 +1085,21 @@ function renderTable() {
     const aTitle = document.createElement('a');
     aTitle.href = (l.url && l.url.startsWith('http')) ? l.url : '#';
     aTitle.target = '_blank';
-    aTitle.textContent = (l.title || 'Tiggo 8 Pro') + ' ↗';
+    aTitle.textContent = (l.title || 'DealRadar') + ' ↗';
     divTitle.appendChild(aTitle);
     
     const divMeta = document.createElement('div');
     divMeta.className = 'listing-meta';
     const spanSeen = document.createElement('span');
-    spanSeen.textContent = 'Seen: ' + (l.first_seen ? l.first_seen.slice(0,10) : '—');
+    let ageHtml = '';
+    if (l.first_seen) {
+      const end = (l.is_active || !l.last_seen) ? new Date() : new Date(l.last_seen);
+      const start = new Date(l.first_seen);
+      const diffDays = Math.max(0, Math.floor(Math.abs(end - start) / (1000 * 60 * 60 * 24)));
+      const ageStyle = diffDays > 30 ? 'class="age-old"' : '';
+      ageHtml = ` &middot; Age: <span ${ageStyle}>${diffDays}d</span>`;
+    }
+    spanSeen.innerHTML = 'Seen: ' + (l.first_seen ? l.first_seen.slice(0,10) : '—') + ageHtml;
     divMeta.appendChild(spanSeen);
     
     tdListing.appendChild(divTitle);
@@ -1007,13 +1120,21 @@ function renderTable() {
     divPrice.className = 'price-cell';
     divPrice.textContent = fmt(l.price);
     tdPrice.appendChild(divPrice);
+    tr.appendChild(tdPrice);
+
+    // 4b. Drop
+    const tdDrop = document.createElement('td');
     if (hasDelta) {
       const divDelta = document.createElement('div');
       divDelta.className = `price-delta ${isDown ? 'down' : 'up'}`;
       divDelta.textContent = `${isDown ? '▼' : '▲'} ${fmt(deltaVal)}`;
-      tdPrice.appendChild(divDelta);
+      tdDrop.appendChild(divDelta);
+    } else {
+      tdDrop.textContent = '—';
+      tdDrop.style.color = 'var(--muted)';
+      tdDrop.style.fontSize = '12px';
     }
-    tr.appendChild(tdPrice);
+    tr.appendChild(tdDrop);
 
     // 5. Score
     const tdScore = document.createElement('td');
@@ -1021,12 +1142,18 @@ function renderTable() {
     tdScore.textContent = l._dealScore || '—';
     tr.appendChild(tdScore);
 
-    // 6. Vs Avg
+    // 6. Neg. Gap
     const tdVs = document.createElement('td');
-    if (vsLabel) {
+    if (l.price && avg) {
+      const gap = avg - l.price;
       const spanVs = document.createElement('span');
-      spanVs.className = `vs-avg ${vsClass}`;
-      spanVs.textContent = vsLabel;
+      if (gap > 0) {
+        spanVs.className = 'vs-avg below';
+        spanVs.textContent = `+ ${fmt(gap)}`;
+      } else {
+        spanVs.className = 'vs-avg above';
+        spanVs.textContent = `- ${fmt(Math.abs(gap))}`;
+      }
       tdVs.appendChild(spanVs);
     } else {
       tdVs.textContent = '—';
@@ -1096,8 +1223,25 @@ const chartDefaults = {
 };
 
 async function renderCharts() {
-  const [market] = await Promise.all([fetch('/api/market').then(r => r.json())]);
+  const marketRes = await fetch('/api/market').then(r => r.json());
+  const market = marketRes.chart;
+  const vel = marketRes.velocity_30d;
   const listings = allListings;
+  
+  // Update Velocity Badge
+  const velBadge = document.getElementById('velocity-badge');
+  if (vel !== undefined && vel !== 0) {
+    velBadge.style.display = 'inline-block';
+    if (vel < 0) {
+      velBadge.style.color = 'var(--green)';
+      velBadge.style.borderColor = 'rgba(63,185,80,0.4)';
+      velBadge.textContent = '▼ R ' + Math.abs(vel).toLocaleString() + ' / mo';
+    } else {
+      velBadge.style.color = 'var(--red)';
+      velBadge.style.borderColor = 'rgba(248,81,73,0.4)';
+      velBadge.textContent = '▲ R ' + vel.toLocaleString() + ' / mo';
+    }
+  }
 
   // Market avg chart
   if (charts.market) charts.market.destroy();
@@ -1208,6 +1352,42 @@ async function showHistory(id, title) {
       }
     }
   });
+
+  // Calculate Similar Listings
+  const sdWrap = document.getElementById('similar-listings-wrap');
+  if (sdWrap) sdWrap.style.display = 'none';
+  
+  const me = allListings.find(x => x.id === id);
+  if (me && me.price && me.year && me.mileage) {
+    const scored = allListings
+      .filter(x => x.id !== id && x.price && x.year && x.mileage && x.is_active)
+      .map(x => {
+        // Distance weight: Price diff (low), Year diff (high), Mileage diff (medium)
+        const dPrice = Math.abs(x.price - me.price) / 10000; // 1 pt per 10k
+        const dYear = Math.abs(x.year - me.year) * 5; // 5 pts per year diff
+        const dMil = Math.abs(x.mileage - me.mileage) / 10000; // 1 pt per 10k km
+        return { ...x, _dist: dPrice + dYear + dMil };
+      })
+      .sort((a,b) => a._dist - b._dist)
+      .slice(0, 3);
+      
+    if (sdWrap && scored.length > 0) {
+      sdWrap.style.display = 'block';
+      let html = '';
+      scored.forEach(s => {
+        html += `
+          <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);padding:8px 12px;border-radius:4px;border:1px solid var(--border)">
+            <div style="flex:1">
+              <a href="${s.url}" target="_blank" style="color:var(--text);text-decoration:none;font-weight:600;font-size:13px">${s.title || 'Unknown Vehicle'}</a>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">${s.year} &middot; ${Number(s.mileage).toLocaleString()} km &middot; ${s.location||'Anywhere'}</div>
+            </div>
+            <div style="font-weight:bold;color:var(--gold)">R ${Number(s.price).toLocaleString()}</div>
+          </div>
+        `;
+      });
+      document.getElementById('similar-listings').innerHTML = html;
+    }
+  }
 }
 
 function closeModal() {
@@ -1233,6 +1413,66 @@ async function loadRuns() {
   `).join('');
 }
 
+// ─── DEALERS ───────────────────────────────────────────────────────────────
+function renderDealers() {
+  const activeData = allListings.filter(l => l.is_active === 1);
+  const avgMktPrice = activeData.reduce((a, b) => a + (b.price || 0), 0) / (activeData.length || 1);
+  
+  const dMap = {};
+  // Aggregate dealer stats
+  activeData.forEach(l => {
+    if (!l.dealer) return;
+    const key = l.dealer;
+    if (!dMap[key]) dMap[key] = { name: key, inv: 0, drops: 0, devSum: 0 };
+    
+    dMap[key].inv++;
+    if (l.prev_price && l.price < l.prev_price) dMap[key].drops++;
+    
+    if (l.price) {
+        // Deviation percentage from market average (negative means cheaper than market)
+        const devPct = ((l.price - avgMktPrice) / avgMktPrice) * 100;
+        dMap[key].devSum += devPct;
+    }
+  });
+  
+  let dealers = Object.values(dMap).map(d => {
+      d.avgDev = d.devSum / d.inv;
+      // Grade assignment
+      if (d.avgDev < -5) d.grade = 'A';
+      else if (d.avgDev <= 0) d.grade = 'B';
+      else if (d.avgDev <= 5) d.grade = 'C';
+      else d.grade = 'F';
+      return d;
+  }).filter(d => d.inv > 1).sort((a,b) => a.avgDev - b.avgDev); // Only show dealers with > 1 car, sorted by best deals
+
+  const tbody = document.getElementById('dealers-tbody');
+  tbody.innerHTML = '';
+  
+  if (dealers.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:30px">Not enough dealer data yet.</td></tr>';
+    return;
+  }
+  
+  dealers.forEach((d, i) => {
+    let gradeColor = 'var(--text)';
+    if (d.grade === 'A') gradeColor = '#58a6ff';
+    if (d.grade === 'B') gradeColor = 'var(--green)';
+    if (d.grade === 'C') gradeColor = 'var(--gold)';
+    if (d.grade === 'F') gradeColor = 'var(--red)';
+    
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color:var(--dim)">${i+1}</td>
+      <td style="font-weight:600;color:var(--text)">${d.name}</td>
+      <td style="text-align:right;color:var(--text)">${d.inv}</td>
+      <td style="text-align:right;color:var(--green)">${d.drops}</td>
+      <td style="text-align:right;color:${d.avgDev > 0 ? 'var(--red)' : 'var(--green)'}">${d.avgDev > 0 ? '+' : ''}${d.avgDev.toFixed(1)}%</td>
+      <td style="text-align:center;font-weight:900;font-size:18px;color:${gradeColor}">${d.grade}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
 // ─── INIT ──────────────────────────────────────────────────────────────────
 loadListings();
 </script>
@@ -1242,6 +1482,6 @@ loadListings();
 
 
 if __name__ == "__main__":
-    print("\n  Tiggo 8 Pro Price Tracker")
+    print("\n  DealRadar Price Tracker")
     print("  Open → http://localhost:5001\n")
     app.run(debug=False, port=5001, host="0.0.0.0")

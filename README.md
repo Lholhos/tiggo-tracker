@@ -1,6 +1,6 @@
-# Tiggo 8 Pro · Price Tracker
+# DealRadar
 
-AutoTrader price monitor for **Chery Tiggo 8 Pro 2022–2024**, sorted by price.  
+AutoTrader + WeBuyCars price monitor for **Vehicles**, sorted by price.  
 Runs locally. Scrapes on demand via a web UI. Stores all history in SQLite.
 
 ---

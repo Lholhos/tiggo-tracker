@@ -1,6 +1,6 @@
 """
 AutoTrader scraper using Playwright (headless Chromium).
-Targets: Chery Tiggo 8 Pro, 2022-2024, sorted by price ascending.
+Targets: Vehicle listings, sorted by price ascending.
 """
 
 import re
@@ -47,7 +47,7 @@ def _parse_wbc(page, log) -> list[dict]:
                 data = json.loads(block)
                 if data.get("@type") == "Car":
                     url = data.get("url", "")
-                    if "Tiggo 8 PRO" not in data.get("name", ""):
+                    if not data.get("name", ""):
                         continue
                         
                     price = None
@@ -184,12 +184,12 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
                             const titleEls = tile.querySelectorAll('span, h1, h2, h3, h4, div, [class*="title"]');
                             for (let el of titleEls) {
                                 let txt = el.innerText ? el.innerText.trim() : '';
-                                if (/chery|tiggo/i.test(txt) && txt.length > 5 && txt.length < 60) {
+                                if (txt.length > 5 && txt.length < 60 && !txt.includes('R ') && !txt.includes('km')) {
                                     title = txt.split('\\n')[0];
                                     break;
                                 }
                             }
-                            if (!title) title = 'Chery Tiggo 8 Pro';
+                            if (!title) title = 'Vehicle';
 
                             // Year
                             const yearMatch = (tile.innerText || '').match(/\\b(202[2-4])\\b/);

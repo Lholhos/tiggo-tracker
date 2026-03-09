@@ -1,5 +1,5 @@
 """
-SQLite database layer for the Tiggo price tracker.
+SQLite database layer for the DealRadar price tracker.
 Stores listings and full price history per listing (keyed by URL).
 """
 

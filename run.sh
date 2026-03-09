@@ -1,13 +1,13 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
-#  Tiggo 8 Pro Price Tracker — Setup & Run
+#  DealRadar — Setup & Run
 # ─────────────────────────────────────────────
 
 set -e
 
 echo ""
 echo "  ╔════════════════════════════════════╗"
-echo "  ║   Tiggo 8 Pro · Price Tracker      ║"
+echo "  ║            DealRadar               ║"
 echo "  ╚════════════════════════════════════╝"
 echo ""
 
