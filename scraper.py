@@ -6,12 +6,14 @@ Targets: Chery Tiggo 8 Pro, 2022-2024, sorted by price ascending.
 import re
 import time
 import random
+import json
 from playwright.sync_api import sync_playwright
 
-BASE_URL = (
+AT_BASE_URL = (
     "https://www.autotrader.co.za/cars-for-sale/chery/tiggo-8-pro"
     "?sortorder=PriceLow&year=2022-to-2024"
 )
+WBC_URL = "https://www.webuycars.co.za/buy-a-car?q=%22Chery%20Tiggo%208%20PRO%22&Year=[2022,2024]&Year_Gte=%222022%22&Year_Lte=%222024%22"
 
 
 def parse_price(text: str) -> int | None:
@@ -23,6 +25,76 @@ def parse_mileage(text: str) -> int | None:
     digits = re.sub(r"[^\d]", "", text)
     return int(digits) if digits else None
 
+
+def _parse_wbc(page, log) -> list[dict]:
+    log("Scraping WeBuyCars via JSON-LD...")
+    try:
+        page.goto(WBC_URL, wait_until="domcontentloaded", timeout=60000)
+        # Wait a bit for JS to inject the JSON-LD payload into the head
+        time.sleep(3)
+        
+        # Extract all JSON-LD blocks
+        json_ld_blocks = page.evaluate("""
+            () => {
+                const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+                return Array.from(scripts).map(s => s.innerText);
+            }
+        """)
+        
+        results = []
+        for block in json_ld_blocks:
+            try:
+                data = json.loads(block)
+                if data.get("@type") == "Car":
+                    url = data.get("url", "")
+                    if "Tiggo 8 PRO" not in data.get("name", ""):
+                        continue
+                        
+                    price = None
+                    dealer_name = "WeBuyCars"
+                    location = ""
+                    
+                    offers = data.get("offers", {})
+                    if isinstance(offers, dict):
+                        price = parse_price(str(offers.get("price", "")))
+                        seller = offers.get("seller", {})
+                        dealer_name = seller.get("name", "WeBuyCars")
+                        addr = seller.get("address", {})
+                        if isinstance(addr, dict):
+                            location = addr.get("addressLocality", "")
+                            
+                    mileage = None
+                    mileage_obj = data.get("mileageFromOdometer")
+                    if isinstance(mileage_obj, dict):
+                        mileage = parse_mileage(str(mileage_obj.get("value", "")))
+                    
+                    year = str(data.get("productionDate", data.get("vehicleModelDate", "")))
+                    
+                    # Ensure minimum valid data
+                    if not price or not url:
+                        continue
+                        
+                    results.append({
+                        "title": data.get("name", ""),
+                        "price_raw": str(offers.get("price", "")),
+                        "price": price,
+                        "year": year,
+                        "mileage": mileage,
+                        "mileage_raw": str(mileage) + " km" if mileage else "",
+                        "location": location,
+                        "dealer": dealer_name,
+                        "url": url,
+                        "image": data.get("image", ""),
+                        "source": "WeBuyCars"
+                    })
+            except Exception:
+                pass
+                
+        log(f"  Found {len(results)} listings from WeBuyCars")
+        return results
+    except Exception as e:
+        log(f"WBC Error: {e}")
+        return []
 
 def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> list[dict]:
     listings = []
@@ -57,9 +129,10 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
 
+        # 1) AutoTrader
         for page_num in range(1, max_pages + 1):
-            url = BASE_URL if page_num == 1 else f"{BASE_URL}&pagenumber={page_num}"
-            log(f"Scraping page {page_num}: {url}")
+            url = AT_BASE_URL if page_num == 1 else f"{AT_BASE_URL}&pagenumber={page_num}"
+            log(f"Scraping AT page {page_num}: {url}")
 
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -178,6 +251,7 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
                     "dealer": item.get("dealer", "").replace("\n", " ").strip(),
                     "url": item.get("url", "").strip(),
                     "image": item.get("image", "").strip(),
+                    "source": "AutoTrader"
                 }
 
                 # Deduplicate by URL
@@ -195,7 +269,11 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
                 log(f"  No next page button — done")
                 break
 
-            time.sleep(random.uniform(2, 4))
+        # 2) WeBuyCars
+        wbc_results = _parse_wbc(page, log)
+        for w in wbc_results:
+            if not any(l["url"] == w["url"] for l in listings):
+                listings.append(w)
 
         browser.close()
 
@@ -220,12 +298,62 @@ def scrape_single_url(url: str, headless: bool = True, status_callback=None) -> 
         page = context.new_page()
 
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            
-            # Wait for some main element to load
-            page.wait_for_selector('h1, [data-testid="price"], [class*="price"]', timeout=15000)
-
-            item = page.evaluate("""
+            if "webuycars.co.za" in url:
+                # Mock a search page run since WeBuyCars JSON-LD is on the search, but maybe it's on single too
+                # We'll just run the same JS logic and see if a Car type exists
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                time.sleep(2)
+                json_ld_blocks = page.evaluate("""
+                    () => {
+                        const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+                        return Array.from(scripts).map(s => s.innerText);
+                    }
+                """)
+                for block in json_ld_blocks:
+                    try:
+                        data = json.loads(block)
+                        if data.get("@type") == "Car":
+                            price = None
+                            dealer_name = "WeBuyCars"
+                            location = ""
+                            offers = data.get("offers", {})
+                            if isinstance(offers, dict):
+                                price = parse_price(str(offers.get("price", "")))
+                                seller = offers.get("seller", {})
+                                dealer_name = seller.get("name", "WeBuyCars")
+                                addr = seller.get("address", {})
+                                if isinstance(addr, dict):
+                                    location = addr.get("addressLocality", "")
+                            mileage = None
+                            mileage_obj = data.get("mileageFromOdometer")
+                            if isinstance(mileage_obj, dict):
+                                mileage = parse_mileage(str(mileage_obj.get("value", "")))
+                            year = str(data.get("productionDate", data.get("vehicleModelDate", "")))
+                            
+                            listing = {
+                                "title": data.get("name", ""),
+                                "price_raw": str(offers.get("price", "")),
+                                "price": price,
+                                "year": year,
+                                "mileage": mileage,
+                                "mileage_raw": str(mileage) + " km" if mileage else "",
+                                "location": location,
+                                "dealer": dealer_name,
+                                "url": url,
+                                "image": data.get("image", ""),
+                                "source": "WeBuyCars"
+                            }
+                            results.append(listing)
+                            break
+                    except Exception:
+                        pass
+            else:
+                # AutoTrader Single Parse
+                page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                # Wait for some main element to load
+                page.wait_for_selector('h1, [data-testid="price"], [class*="price"]', timeout=15000)
+    
+                item = page.evaluate("""
                 () => {
                     const getElText = (selector) => {
                         const el = document.querySelector(selector);
@@ -276,6 +404,7 @@ def scrape_single_url(url: str, headless: bool = True, status_callback=None) -> 
                     "dealer": item.get("dealer", "").replace("\n", " ").strip(),
                     "url": item.get("url", "").strip(),
                     "image": item.get("image", "").strip(),
+                    "source": "AutoTrader"
                 }
                 results.append(listing)
 

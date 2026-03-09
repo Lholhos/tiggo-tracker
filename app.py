@@ -526,6 +526,18 @@ HTML = """<!DOCTYPE html>
     cursor: pointer;
     margin-top: 20px;
   }
+  .sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+  .sortable:hover {
+    color: var(--text);
+  }
+  .sort-icon {
+    font-size: 10px;
+    margin-left: 4px;
+    color: var(--gold);
+  }
 
   /* RUNS */
   .run-row {
@@ -615,10 +627,6 @@ HTML = """<!DOCTYPE html>
       <button class="filter-btn" onclick="setYear('2022', this)">2022</button>
       <button class="filter-btn" onclick="setYear('2023', this)">2023</button>
       <button class="filter-btn" onclick="setYear('2024', this)">2024</button>
-      <span class="filter-label" style="margin-left:16px">Sort:</span>
-      <button class="filter-btn active" onclick="setSort('price', this)">Price</button>
-      <button class="filter-btn" onclick="setSort('mileage', this)">Mileage</button>
-      <button class="filter-btn" onclick="setSort('year', this)">Year</button>
       <span class="filter-label" style="margin-left:16px">Location:</span>
       <select id="filter-location" onchange="setLocation(this.value)" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-family:inherit;font-size:12px;outline:none">
         <option value="all">All</option>
@@ -635,14 +643,15 @@ HTML = """<!DOCTYPE html>
         <thead>
           <tr>
             <th style="width:36px">#</th>
-            <th>Listing</th>
-            <th>Price</th>
-            <th>Score</th>
+            <th class="sortable" onclick="setSort('title')">Listing <span class="sort-icon" id="sort-icon-title"></span></th>
+            <th class="sortable" onclick="setSort('source')">Source <span class="sort-icon" id="sort-icon-source"></span></th>
+            <th class="sortable" onclick="setSort('price')">Price <span class="sort-icon" id="sort-icon-price"></span></th>
+            <th class="sortable" onclick="setSort('score')">Score <span class="sort-icon" id="sort-icon-score"></span></th>
             <th>Vs Avg</th>
-            <th>Mileage</th>
-            <th>Year</th>
-            <th>Location & Dealer</th>
-            <th>Status / Time to Sell</th>
+            <th class="sortable" onclick="setSort('mileage')">Mileage <span class="sort-icon" id="sort-icon-mileage"></span></th>
+            <th class="sortable" onclick="setSort('year')">Year <span class="sort-icon" id="sort-icon-year"></span></th>
+            <th class="sortable" onclick="setSort('location')">Location & Dealer <span class="sort-icon" id="sort-icon-location"></span></th>
+            <th class="sortable" onclick="setSort('status')">Status / Time to Sell <span class="sort-icon" id="sort-icon-status"></span></th>
             <th></th>
           </tr>
         </thead>
@@ -707,6 +716,7 @@ let filterYear = 'all';
 let filterLocation = 'all';
 let filterStatus = 'active';
 let sortKey = 'price';
+let sortAsc = true;
 
 function setLocation(val) {
   filterLocation = val;
@@ -758,12 +768,13 @@ function setYear(y, btn) {
   btn.classList.add('active');
   renderTable();
 }
-function setSort(key, btn) {
-  sortKey = key;
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    if (['Price','Mileage','Year'].includes(b.textContent)) b.classList.remove('active');
-  });
-  btn.classList.add('active');
+function setSort(key) {
+  if (sortKey === key) {
+    sortAsc = !sortAsc;
+  } else {
+    sortKey = key;
+    sortAsc = true;
+  }
   renderTable();
 }
 
@@ -900,13 +911,30 @@ function renderTable() {
   // Compute deal score before sorting
   data.forEach(l => l._dealScore = getDealScore(l, avg));
 
-  if (sortKey === 'price') data = [...data].sort((a,b) => (a.price||9e9) - (b.price||9e9));
-  if (sortKey === 'mileage') data = [...data].sort((a,b) => (a.mileage||9e9) - (b.mileage||9e9));
-  if (sortKey === 'year') data = [...data].sort((a,b) => (b.year||0) - (a.year||0));
+  data.sort((a, b) => {
+    let valA, valB;
+    if (sortKey === 'price') { valA = a.price||9e9; valB = b.price||9e9; }
+    else if (sortKey === 'mileage') { valA = a.mileage||9e9; valB = b.mileage||9e9; }
+    else if (sortKey === 'year') { valA = a.year||0; valB = b.year||0; }
+    else if (sortKey === 'score') { valA = a._dealScore; valB = b._dealScore; }
+    else if (sortKey === 'source') { valA = a.source||''; valB = b.source||''; }
+    else if (sortKey === 'title') { valA = a.title||''; valB = b.title||''; }
+    else if (sortKey === 'location') { valA = a.location||''; valB = b.location||''; }
+    else if (sortKey === 'status') { valA = a.is_active||0; valB = b.is_active||0; }
+    else { valA = a.price; valB = b.price; }
+    
+    if (valA < valB) return sortAsc ? -1 : 1;
+    if (valA > valB) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  document.querySelectorAll('.sort-icon').forEach(el => el.innerHTML = '');
+  const icon = document.getElementById('sort-icon-' + sortKey);
+  if (icon) icon.innerHTML = sortAsc ? '↑' : '↓';
 
   const tbody = document.getElementById('listings-tbody');
   if (!data.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
       <div class="icon">🔍</div>
       <div class="msg">No listings</div>
       <div class="sub">Run a scrape or adjust filters</div>
@@ -914,16 +942,15 @@ function renderTable() {
     return;
   }
 
-  tbody.innerHTML = data.map((l, i) => {
+  tbody.innerHTML = '';
+  data.forEach((l, i) => {
     const diff = avg && l.price ? ((l.price - avg) / avg * 100).toFixed(1) : null;
     const vsClass = diff === null ? '' : diff < -5 ? 'below' : diff > 5 ? 'above' : 'at';
     const vsLabel = diff === null ? '' : diff < 0 ? `▼ ${Math.abs(diff)}%` : `▲ ${diff}%`;
 
-    const delta = l.prev_price && l.price !== l.prev_price
-      ? `<div class="price-delta ${l.price < l.prev_price ? 'down' : 'up'}">
-          ${l.price < l.prev_price ? '▼' : '▲'} ${fmt(Math.abs(l.price - l.prev_price))}
-         </div>`
-      : '';
+    const hasDelta = l.prev_price && l.price !== l.prev_price;
+    const isDown = l.price < l.prev_price;
+    const deltaVal = hasDelta ? Math.abs(l.price - l.prev_price) : 0;
 
     let scoreColor = 'var(--muted)';
     if (l._dealScore >= 75) scoreColor = 'var(--green)';
@@ -937,35 +964,124 @@ function renderTable() {
       timeToSellLabel = `Gone in ${Math.max(1, days)}d`;
     }
 
-    return `<tr style="${l.is_active === 0 ? 'opacity:0.5' : ''}">
-      <td class="rank-num">${i+1}</td>
-      <td>
-        <div class="listing-title">
-          <a href="${l.url}" target="_blank">${l.title || 'Tiggo 8 Pro'} ↗</a>
-        </div>
-        <div class="listing-meta">
-          <span>Seen: ${l.first_seen ? l.first_seen.slice(0,10) : '—'}</span>
-          ${l.year ? `<span>${l.year}</span>` : ''}
-        </div>
-      </td>
-      <td>
-        <div class="price-cell">${fmt(l.price)}</div>
-        ${delta}
-      </td>
-      <td style="color:${scoreColor};font-weight:bold">${l._dealScore || '—'}</td>
-      <td>${vsLabel ? `<span class="vs-avg ${vsClass}">${vsLabel}</span>` : '—'}</td>
-      <td style="font-family:monospace">${l.mileage ? Number(l.mileage).toLocaleString() + ' km' : l.mileage_raw || '—'}</td>
-      <td style="font-family:monospace">${l.year || '—'}</td>
-      <td>
-        <div style="color:var(--text);font-size:12px">${l.location || '—'}</div>
-        <div style="font-size:11px;color:rgba(255,255,255,0.4)">${l.dealer || ''}</div>
-      </td>
-      <td style="font-size:11px">
-        ${l.is_active ? '<span style="color:var(--green)">Active</span>' : `<span style="color:var(--red)">${timeToSellLabel}</span>`}
-      </td>
-      <td><button class="history-btn" onclick="showHistory(${l.id}, '${(l.title||'').replace(/'/g,'\\'')}')">History</button></td>
-    </tr>`;
-  }).join('');
+    const tr = document.createElement('tr');
+    if (l.is_active === 0) tr.style.opacity = '0.5';
+
+    // 1. #
+    const tdRank = document.createElement('td');
+    tdRank.className = 'rank-num';
+    tdRank.textContent = i + 1;
+    tr.appendChild(tdRank);
+
+    // 2. Listing
+    const tdListing = document.createElement('td');
+    const divTitle = document.createElement('div');
+    divTitle.className = 'listing-title';
+    const aTitle = document.createElement('a');
+    aTitle.href = (l.url && l.url.startsWith('http')) ? l.url : '#';
+    aTitle.target = '_blank';
+    aTitle.textContent = (l.title || 'Tiggo 8 Pro') + ' ↗';
+    divTitle.appendChild(aTitle);
+    
+    const divMeta = document.createElement('div');
+    divMeta.className = 'listing-meta';
+    const spanSeen = document.createElement('span');
+    spanSeen.textContent = 'Seen: ' + (l.first_seen ? l.first_seen.slice(0,10) : '—');
+    divMeta.appendChild(spanSeen);
+    
+    tdListing.appendChild(divTitle);
+    tdListing.appendChild(divMeta);
+    tr.appendChild(tdListing);
+
+    // 3. Source
+    const tdSrc = document.createElement('td');
+    const spanSrc = document.createElement('span');
+    spanSrc.style.cssText = 'background:var(--tertiary); color:var(--text); padding:4px 8px; border-radius:4px; font-size:11px; white-space:nowrap';
+    spanSrc.textContent = l.source || 'AutoTrader';
+    tdSrc.appendChild(spanSrc);
+    tr.appendChild(tdSrc);
+
+    // 4. Price
+    const tdPrice = document.createElement('td');
+    const divPrice = document.createElement('div');
+    divPrice.className = 'price-cell';
+    divPrice.textContent = fmt(l.price);
+    tdPrice.appendChild(divPrice);
+    if (hasDelta) {
+      const divDelta = document.createElement('div');
+      divDelta.className = `price-delta ${isDown ? 'down' : 'up'}`;
+      divDelta.textContent = `${isDown ? '▼' : '▲'} ${fmt(deltaVal)}`;
+      tdPrice.appendChild(divDelta);
+    }
+    tr.appendChild(tdPrice);
+
+    // 5. Score
+    const tdScore = document.createElement('td');
+    tdScore.style.cssText = `color:${scoreColor};font-weight:bold`;
+    tdScore.textContent = l._dealScore || '—';
+    tr.appendChild(tdScore);
+
+    // 6. Vs Avg
+    const tdVs = document.createElement('td');
+    if (vsLabel) {
+      const spanVs = document.createElement('span');
+      spanVs.className = `vs-avg ${vsClass}`;
+      spanVs.textContent = vsLabel;
+      tdVs.appendChild(spanVs);
+    } else {
+      tdVs.textContent = '—';
+    }
+    tr.appendChild(tdVs);
+
+    // 7. Mileage
+    const tdMil = document.createElement('td');
+    tdMil.style.fontFamily = 'monospace';
+    tdMil.textContent = l.mileage ? Number(l.mileage).toLocaleString() + ' km' : (l.mileage_raw || '—');
+    tr.appendChild(tdMil);
+
+    // 8. Year
+    const tdYear = document.createElement('td');
+    tdYear.style.fontFamily = 'monospace';
+    tdYear.textContent = l.year || '—';
+    tr.appendChild(tdYear);
+
+    // 9. Location & Dealer
+    const tdLoc = document.createElement('td');
+    const divLoc = document.createElement('div');
+    divLoc.style.cssText = 'color:var(--text);font-size:12px';
+    divLoc.textContent = l.location || '—';
+    const divDealer = document.createElement('div');
+    divDealer.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.4)';
+    divDealer.textContent = l.dealer || '';
+    tdLoc.appendChild(divLoc);
+    tdLoc.appendChild(divDealer);
+    tr.appendChild(tdLoc);
+
+    // 10. Status
+    const tdStatus = document.createElement('td');
+    tdStatus.style.fontSize = '11px';
+    const spanStat = document.createElement('span');
+    if (l.is_active) {
+      spanStat.style.color = 'var(--green)';
+      spanStat.textContent = 'Active';
+    } else {
+      spanStat.style.color = 'var(--red)';
+      spanStat.textContent = timeToSellLabel;
+    }
+    tdStatus.appendChild(spanStat);
+    tr.appendChild(tdStatus);
+
+    // 11. History
+    const tdHist = document.createElement('td');
+    const btnHist = document.createElement('button');
+    btnHist.className = 'history-btn';
+    btnHist.textContent = 'History';
+    btnHist.onclick = () => showHistory(l.id, l.title || '');
+    tdHist.appendChild(btnHist);
+    tr.appendChild(tdHist);
+
+    tbody.appendChild(tr);
+  });
 }
 
 // ─── CHARTS ────────────────────────────────────────────────────────────────

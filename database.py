@@ -31,7 +31,8 @@ def init_db():
                 image       TEXT,
                 first_seen  TEXT NOT NULL,
                 last_seen   TEXT NOT NULL,
-                is_active   INTEGER DEFAULT 1
+                is_active   INTEGER DEFAULT 1,
+                source      TEXT DEFAULT 'AutoTrader'
             );
 
             CREATE TABLE IF NOT EXISTS price_history (
@@ -63,9 +64,13 @@ def init_db():
                 value TEXT
             );
         """)
-        # Safely add dealer column if migrating an existing database
+        # Safely add columns if migrating an existing database
         try:
             conn.execute("ALTER TABLE listings ADD COLUMN dealer TEXT;")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE listings ADD COLUMN source TEXT DEFAULT 'AutoTrader';")
         except sqlite3.OperationalError:
             pass
 
@@ -99,9 +104,9 @@ def upsert_listings(listings: list[dict]) -> dict:
             if row is None:
                 # New listing
                 conn.execute(
-                    """INSERT INTO listings (url, title, year, location, dealer, image, first_seen, last_seen, is_active)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-                    (url, item.get("title"), item.get("year"), item.get("location"), item.get("dealer"), item.get("image"), now, now),
+                    """INSERT INTO listings (url, title, year, location, dealer, image, first_seen, last_seen, is_active, source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                    (url, item.get("title"), item.get("year"), item.get("location"), item.get("dealer"), item.get("image"), now, now, item.get("source", "AutoTrader")),
                 )
                 listing_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                 stats["new"] += 1
@@ -109,9 +114,9 @@ def upsert_listings(listings: list[dict]) -> dict:
                 listing_id = row["id"]
                 # Update last_seen and metadata
                 conn.execute(
-                    """UPDATE listings SET last_seen=?, title=?, location=?, dealer=?, image=?, is_active=1
+                    """UPDATE listings SET last_seen=?, title=?, location=?, dealer=?, image=?, is_active=1, source=COALESCE(?, source)
                        WHERE id=?""",
-                    (now, item.get("title"), item.get("location"), item.get("dealer"), item.get("image"), listing_id),
+                    (now, item.get("title"), item.get("location"), item.get("dealer"), item.get("image"), item.get("source"), listing_id),
                 )
 
                 # Check last price
@@ -157,7 +162,7 @@ def get_listings_with_latest_price(include_inactive: bool = False) -> list[dict]
         where_clause = "" if include_inactive else "WHERE l.is_active = 1"
         rows = conn.execute(f"""
             SELECT
-                l.id, l.url, l.title, l.year, l.location, l.dealer, l.image,
+                l.id, l.url, l.title, l.year, l.location, l.dealer, l.image, l.source,
                 l.first_seen, l.last_seen, l.is_active,
                 ph.price, ph.mileage, ph.mileage_raw, ph.price_raw, ph.scraped_at,
                 prev.price AS prev_price
