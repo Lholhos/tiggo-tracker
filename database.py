@@ -25,6 +25,7 @@ def init_db():
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 url         TEXT UNIQUE NOT NULL,
                 title       TEXT,
+                model       TEXT,
                 year        TEXT,
                 location    TEXT,
                 dealer      TEXT,
@@ -104,9 +105,9 @@ def upsert_listings(listings: list[dict]) -> dict:
             if row is None:
                 # New listing
                 conn.execute(
-                    """INSERT INTO listings (url, title, year, location, dealer, image, first_seen, last_seen, is_active, source)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
-                    (url, item.get("title"), item.get("year"), item.get("location"), item.get("dealer"), item.get("image"), now, now, item.get("source", "AutoTrader")),
+                    """INSERT INTO listings (url, title, model, year, location, dealer, image, first_seen, last_seen, is_active, source)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                    (url, item.get("title"), item.get("model"), item.get("year"), item.get("location"), item.get("dealer"), item.get("image"), now, now, item.get("source", "AutoTrader")),
                 )
                 listing_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                 stats["new"] += 1
@@ -114,9 +115,9 @@ def upsert_listings(listings: list[dict]) -> dict:
                 listing_id = row["id"]
                 # Update last_seen and metadata
                 conn.execute(
-                    """UPDATE listings SET last_seen=?, title=?, location=?, dealer=?, image=?, is_active=1, source=COALESCE(?, source)
+                    """UPDATE listings SET last_seen=?, title=?, model=?, location=?, dealer=?, image=?, is_active=1, source=COALESCE(?, source)
                        WHERE id=?""",
-                    (now, item.get("title"), item.get("location"), item.get("dealer"), item.get("image"), item.get("source"), listing_id),
+                    (now, item.get("title"), item.get("model"), item.get("location"), item.get("dealer"), item.get("image"), item.get("source"), listing_id),
                 )
 
                 # Check last price
@@ -162,7 +163,7 @@ def get_listings_with_latest_price(include_inactive: bool = False) -> list[dict]
         where_clause = "" if include_inactive else "WHERE l.is_active = 1"
         rows = conn.execute(f"""
             SELECT
-                l.id, l.url, l.title, l.year, l.location, l.dealer, l.image, l.source,
+                l.id, l.url, l.title, l.model, l.year, l.location, l.dealer, l.image, l.source,
                 l.first_seen, l.last_seen, l.is_active,
                 ph.price, ph.mileage, ph.mileage_raw, ph.price_raw, ph.scraped_at,
                 prev.price AS prev_price
@@ -180,7 +181,12 @@ def get_listings_with_latest_price(include_inactive: bool = False) -> list[dict]
             {where_clause}
             ORDER BY ph.price ASC
         """).fetchall()
-        return [dict(r) for r in rows]
+        return [{
+            "id": r[0], "url": r[1], "title": r[2], "model": r[3], "year": r[4], "location": r[5], "dealer": r[6], "image": r[7], "source": r[8],
+            "first_seen": r[9], "last_seen": r[10], "is_active": r[11],
+            "price": r[12], "mileage": r[13], "mileage_raw": r[14], "price_raw": r[15], "scraped_at": r[16],
+            "prev_price": r[17]
+        } for r in rows]
 
 
 def get_price_history(listing_id: int) -> list[dict]:

@@ -74,8 +74,23 @@ def _parse_wbc(page, log) -> list[dict]:
                     if not price or not url:
                         continue
                         
+                    # Try to separate make and model from the name
+                    raw_title = data.get("name", "")
+                    
+                    # Heuristic model extraction
+                    words = raw_title.split()
+                    model = ""
+                    if len(words) > 1:
+                        if words[0].isdigit() and len(words) > 2:
+                            # e.g '2022 Chery Tiggo' -> Model = Tiggo
+                            model = words[2]
+                        else:
+                            # e.g 'Chery Tiggo' -> Model = Tiggo
+                            model = words[1]
+                            
                     results.append({
-                        "title": data.get("name", ""),
+                        "title": raw_title,
+                        "model": model,
                         "price_raw": str(offers.get("price", "")),
                         "price": price,
                         "year": year,
@@ -181,15 +196,15 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
 
                             // Title / make+model+variant
                             let title = '';
-                            const titleEls = tile.querySelectorAll('span, h1, h2, h3, h4, div, [class*="title"]');
+                            const titleEls = tile.querySelectorAll('span, h1, h2, h3, h4, div, [class*="title"], [class*="e-title"]');
                             for (let el of titleEls) {
                                 let txt = el.innerText ? el.innerText.trim() : '';
-                                if (txt.length > 5 && txt.length < 60 && !txt.includes('R ') && !txt.includes('km')) {
+                                if (txt.length > 5 && txt.length < 60 && !txt.includes('R ') && !txt.includes('km') && !txt.includes('Price') && !txt.includes('Fair') && !txt.includes('High') && txt !== 'Chery') {
                                     title = txt.split('\\n')[0];
                                     break;
                                 }
                             }
-                            if (!title) title = 'Vehicle';
+                            if (!title || title.length < 8) title = 'Vehicle';
 
                             // Year
                             const yearMatch = (tile.innerText || '').match(/\\b(202[2-4])\\b/);
@@ -216,8 +231,34 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
                             const imgEl = tile.querySelector('img');
                             const image = imgEl ? (imgEl.src || imgEl.dataset.src || '') : '';
 
+                            // Fix title if it's just a number or empty, and grab 'model' string
+                            if (!title || /^\\d+$/.test(title) || title.length < 8 || title.includes("Price") || title === 'Vehicle') {
+                                // Extract from URL path if it's a car link
+                                if (url && url.includes('/car-for-sale/')) {
+                                   try {
+                                     let parts = url.split('/car-for-sale/')[1].split('/')[0].split('-');
+                                     title = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+                                   } catch(e) {
+                                     title = 'Chery Tiggo';
+                                   }
+                                } else {
+                                   title = 'Chery Tiggo';
+                                }
+                            }
+                            
+                            let model = '';
+                            // Heuristic model extraction (assume Make is first word, Model is second)
+                            let words = title.split(' ').filter(w => w.length > 0);
+                            if (words.length > 1) {
+                                if (words[0].match(/^\\d{4}$/) && words.length > 2) {
+                                  model = words[2]; // e.g Year Make Model -> Model
+                                } else {
+                                  model = words[1]; // Make Model -> Model
+                                }
+                            }
+
                             if (price || title) {
-                                results.push({ price, title, year, mileage: mileageText, location, dealer, url, image });
+                                results.push({ price, title, model, year, mileage: mileageText, location, dealer, url, image });
                             }
                         } catch(e) {}
                     });
@@ -240,8 +281,33 @@ def scrape(max_pages: int = 5, headless: bool = True, status_callback=None) -> l
                 if parsed_price and (parsed_price < 100_000 or parsed_price > 2_000_000):
                     continue
 
+                raw_title = item.get("title", "").replace("\n", " ").strip()
+                raw_url = item.get("url", "")
+                
+                if raw_title.lower() == "chery" or not raw_title:
+                    if "/car-for-sale/" in raw_url:
+                        try:
+                            url_parts = raw_url.split("/car-for-sale/")[1].split("/")
+                            raw_title = f"{url_parts[0]} {url_parts[1]}".replace("-", " ").title()
+                        except:
+                            raw_title = "Chery Tiggo 8 Pro"
+                    else:
+                        raw_title = "Chery Tiggo 8 Pro"
+                
+                raw_model = item.get("model", "").replace("\n", " ").strip()
+                
+                if not raw_model and raw_title:
+                    words = raw_title.split(' ')
+                    if len(words) > 1:
+                        if words[0].isdigit() and len(words) > 2:
+                            raw_model = words[2]
+                        else:
+                            raw_model = words[1]
+                
+
                 listing = {
-                    "title": item.get("title", "").replace("\n", " ").strip(),
+                    "title": raw_title,
+                    "model": raw_model,
                     "price_raw": item.get("price", "").strip(),
                     "price": parsed_price,
                     "year": item.get("year", "").strip(),

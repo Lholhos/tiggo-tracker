@@ -657,6 +657,7 @@ HTML = """<!DOCTYPE html>
           <tr>
             <th style="width:36px">#</th>
             <th class="sortable" onclick="setSort('title')">Listing <span class="sort-icon" id="sort-icon-title"></span></th>
+            <th class="sortable" onclick="setSort('model')">Model <span class="sort-icon" id="sort-icon-model"></span></th>
             <th class="sortable" onclick="setSort('source')">Source <span class="sort-icon" id="sort-icon-source"></span></th>
             <th class="sortable" onclick="setSort('price')">Price <span class="sort-icon" id="sort-icon-price"></span></th>
             <th class="sortable" onclick="setSort('change')">Drop <span class="sort-icon" id="sort-icon-change"></span></th>
@@ -670,7 +671,7 @@ HTML = """<!DOCTYPE html>
           </tr>
         </thead>
         <tbody id="listings-tbody">
-          <tr><td colspan="8" class="empty-state" style="padding:60px">
+          <tr><td colspan="9" class="empty-state" style="padding:60px">
             <div class="icon">🚗</div>
             <div class="msg">No data yet</div>
             <div class="sub">Run a scrape to fetch listings</div>
@@ -1018,6 +1019,7 @@ function renderTable() {
     else if (sortKey === 'year') { valA = a.year||0; valB = b.year||0; }
     else if (sortKey === 'score') { valA = a._dealScore; valB = b._dealScore; }
     else if (sortKey === 'source') { valA = a.source||''; valB = b.source||''; }
+    else if (sortKey === 'model') { valA = a.model||''; valB = b.model||''; }
     else if (sortKey === 'title') { valA = a.title||''; valB = b.title||''; }
     else if (sortKey === 'location') { valA = a.location||''; valB = b.location||''; }
     else if (sortKey === 'status') { valA = a.is_active||0; valB = b.is_active||0; }
@@ -1105,6 +1107,12 @@ function renderTable() {
     tdListing.appendChild(divTitle);
     tdListing.appendChild(divMeta);
     tr.appendChild(tdListing);
+
+    // 2b. Model
+    const tdMod = document.createElement('td');
+    tdMod.style.fontFamily = 'monospace';
+    tdMod.textContent = l.model || '—';
+    tr.appendChild(tdMod);
 
     // 3. Source
     const tdSrc = document.createElement('td');
