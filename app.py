@@ -353,7 +353,7 @@ HTML = """<!DOCTYPE html>
   .stat-value.red { color: var(--red); }
 
   /* MAIN LAYOUT */
-  .main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+  .main { padding: 28px 32px; max-width: 1800px; margin: 0 auto; }
 
   /* SCRAPE PANEL */
   .scrape-panel {
@@ -839,7 +839,7 @@ HTML = """<!DOCTYPE html>
   <div class="stat" style="display:none"><div class="stat-label">Last Scraped</div><div class="stat-value" style="font-size:13px;color:var(--muted)" id="stat-last">Never</div></div>
 </div>
 
-<div id="market-insights" style="margin:0 auto 16px auto; max-width:1200px; padding:0 24px; font-size:12px; color:var(--muted); display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+<div id="market-insights" style="margin:0 auto 16px auto; max-width:1800px; padding:0 32px; font-size:12px; color:var(--muted); display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
   <span id="dup-insight" style="background:var(--surface); padding:4px 10px; border-radius:4px; border:1px solid var(--border); display:none; cursor:pointer" onclick="setStatus('duplicates');document.getElementById('filter-status').value='duplicates'">
     <span style="color:var(--gold)">⚡</span> <span id="dup-insight-text"></span>
   </span>
