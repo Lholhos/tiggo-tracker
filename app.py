@@ -556,6 +556,125 @@ HTML = """<!DOCTYPE html>
     margin-bottom: 16px;
   }
 
+  /* COMPARE BUTTON */
+  .cmp-btn {
+    background: none;
+    border: 1px solid var(--border2);
+    color: var(--dim);
+    padding: 2px 6px;
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 3px;
+    line-height: 1;
+    transition: all 0.15s;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .cmp-btn:hover { border-color: var(--gold); color: var(--gold); }
+  .cmp-btn.in-compare { background: rgba(212,168,67,0.12); border-color: var(--gold); color: var(--gold); }
+
+  /* COMPARE BAR */
+  .compare-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border2);
+    padding: 12px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    z-index: 150;
+    transform: translateY(100%);
+    transition: transform 0.2s ease;
+  }
+  .compare-bar.visible { transform: translateY(0); }
+  .cmp-thumb-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+  }
+  .cmp-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    padding: 6px 10px;
+    max-width: 240px;
+  }
+  .cmp-chip img { width: 48px; height: 32px; object-fit: cover; border-radius: 2px; flex-shrink: 0; }
+  .cmp-chip-title { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmp-chip-price { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--gold); white-space: nowrap; }
+  .cmp-chip-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; }
+  .cmp-chip-remove:hover { color: var(--red); }
+  .cmp-slot {
+    width: 180px; height: 44px;
+    border: 1px dashed var(--border2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--dim); font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 1px;
+  }
+
+  /* COMPARE MODAL */
+  .cmp-modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(8,11,16,0.9);
+    display: none; align-items: flex-start; justify-content: center;
+    z-index: 300;
+    overflow-y: auto;
+    padding: 32px 16px;
+  }
+  .cmp-modal-overlay.open { display: flex; }
+  .cmp-modal {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    padding: 28px;
+    width: 100%;
+    max-width: 960px;
+  }
+  .cmp-grid {
+    display: grid;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    margin-top: 20px;
+  }
+  .cmp-row {
+    display: grid;
+    background: var(--surface);
+    min-height: 40px;
+  }
+  .cmp-row.header-row { background: var(--bg); }
+  .cmp-cell {
+    padding: 10px 14px;
+    font-size: 12px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+  }
+  .cmp-cell:last-child { border-right: none; }
+  .cmp-cell.row-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: var(--bg);
+  }
+  .cmp-cell.best {
+    color: var(--green);
+    font-weight: 700;
+  }
+  .cmp-cell.worst { color: var(--red); }
+  .cmp-header-cell {
+    padding: 12px 14px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .cmp-header-cell:last-child { border-right: none; }
+
   /* MODAL */
   .modal-overlay {
     position: fixed; inset: 0;
@@ -804,6 +923,7 @@ HTML = """<!DOCTYPE html>
         <thead>
           <tr>
             <th style="width:28px">★</th>
+            <th style="width:32px" title="Add to compare">⊕</th>
             <th style="width:36px">#</th>
             <th class="sortable" onclick="setSort('title')">Listing <span class="sort-icon" id="sort-icon-title"></span></th>
             <th class="sortable" onclick="setSort('model')">Model <span class="sort-icon" id="sort-icon-model"></span></th>
@@ -820,7 +940,7 @@ HTML = """<!DOCTYPE html>
           </tr>
         </thead>
         <tbody id="listings-tbody">
-          <tr><td colspan="14" class="empty-state" style="padding:60px">
+          <tr><td colspan="15" class="empty-state" style="padding:60px">
             <div class="icon">🚗</div>
             <div class="msg">No data yet</div>
             <div class="sub">Run a scrape to fetch listings</div>
@@ -898,6 +1018,24 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+</div>
+
+<!-- Compare Bar -->
+<div class="compare-bar" id="compare-bar">
+  <div class="cmp-thumb-wrap" id="cmp-chips"></div>
+  <button onclick="openCompare()" style="background:var(--gold);color:#080b10;border:none;padding:8px 20px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:700;letter-spacing:2px;cursor:pointer;white-space:nowrap" id="cmp-go-btn">COMPARE (0)</button>
+  <button onclick="clearCompare()" style="background:none;border:1px solid var(--border2);color:var(--muted);padding:8px 14px;font-family:'IBM Plex Mono',monospace;font-size:11px;cursor:pointer">Clear</button>
+</div>
+
+<!-- Compare Modal -->
+<div class="cmp-modal-overlay" id="cmp-modal">
+  <div class="cmp-modal">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--gold)">Side-by-Side Comparison</div>
+      <button onclick="closeCompare()" style="background:none;border:1px solid var(--border2);color:var(--muted);padding:4px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px;cursor:pointer">✕ Close</button>
+    </div>
+    <div id="cmp-content"></div>
+  </div>
 </div>
 
 <!-- History Modal -->
@@ -1310,7 +1448,7 @@ function renderTable() {
 
   const tbody = document.getElementById('listings-tbody');
   if (!data.length) {
-    tbody.innerHTML = `<tr><td colspan="14"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="15"><div class="empty-state">
       <div class="icon">🔍</div>
       <div class="msg">No listings</div>
       <div class="sub">Run a scrape or adjust filters</div>
@@ -1361,6 +1499,18 @@ function renderTable() {
     };
     tdStar.appendChild(btnStar);
     tr.appendChild(tdStar);
+
+    // 1b. Compare toggle
+    const tdCmp = document.createElement('td');
+    tdCmp.style.cssText = 'text-align:center;padding:4px 4px';
+    const btnCmp = document.createElement('button');
+    btnCmp.className = 'cmp-btn' + (compareList.includes(l.id) ? ' in-compare' : '');
+    btnCmp.textContent = compareList.includes(l.id) ? '✓' : '⊕';
+    btnCmp.title = compareList.includes(l.id) ? 'Remove from compare' : 'Add to compare (max 3)';
+    btnCmp.dataset.id = l.id;
+    btnCmp.onclick = (e) => { e.stopPropagation(); toggleCompare(l.id); };
+    tdCmp.appendChild(btnCmp);
+    tr.appendChild(tdCmp);
 
     // 1. #
     const tdRank = document.createElement('td');
@@ -1928,6 +2078,236 @@ function calcOwnership() {
     + `Monthly: ${fmt(Math.round(installment))} loan + ${fmt(insurance)} insure + ${fmt(fuel)} fuel + ${fmt(Math.round(maint/12))} service`;
   el.appendChild(note);
 }
+
+// ─── COMPARE MODE ──────────────────────────────────────────────────────────
+let compareList = []; // array of listing ids
+
+function toggleCompare(id) {
+  const idx = compareList.indexOf(id);
+  if (idx > -1) {
+    compareList.splice(idx, 1);
+  } else {
+    if (compareList.length >= 3) {
+      // Replace oldest
+      compareList.shift();
+    }
+    compareList.push(id);
+  }
+  renderCompareBar();
+  // Update all compare buttons in the table
+  document.querySelectorAll('.cmp-btn').forEach(btn => {
+    const bid = parseInt(btn.dataset.id);
+    const active = compareList.includes(bid);
+    btn.className = 'cmp-btn' + (active ? ' in-compare' : '');
+    btn.textContent = active ? '✓' : '⊕';
+    btn.title = active ? 'Remove from compare' : 'Add to compare (max 3)';
+  });
+}
+
+function renderCompareBar() {
+  const bar = document.getElementById('compare-bar');
+  const chipsEl = document.getElementById('cmp-chips');
+  const goBtn = document.getElementById('cmp-go-btn');
+
+  if (compareList.length === 0) {
+    bar.classList.remove('visible');
+    return;
+  }
+  bar.classList.add('visible');
+  goBtn.textContent = `COMPARE (${compareList.length})`;
+  goBtn.disabled = compareList.length < 2;
+  goBtn.style.opacity = compareList.length < 2 ? '0.5' : '1';
+
+  chipsEl.innerHTML = '';
+  // Show chips for selected listings
+  [0, 1, 2].forEach(slot => {
+    const id = compareList[slot];
+    if (id !== undefined) {
+      const l = allListings.find(x => x.id === id);
+      if (!l) return;
+      const chip = document.createElement('div');
+      chip.className = 'cmp-chip';
+      if (l.image) {
+        const img = document.createElement('img');
+        img.src = l.image;
+        img.onerror = function() { this.style.display = 'none'; };
+        chip.appendChild(img);
+      }
+      const info = document.createElement('div');
+      info.style.cssText = 'overflow:hidden;flex:1';
+      const title = document.createElement('div');
+      title.className = 'cmp-chip-title';
+      title.textContent = l.title || 'Unknown';
+      const price = document.createElement('div');
+      price.className = 'cmp-chip-price';
+      price.textContent = fmt(l.price);
+      info.appendChild(title);
+      info.appendChild(price);
+      chip.appendChild(info);
+      const rm = document.createElement('button');
+      rm.className = 'cmp-chip-remove';
+      rm.textContent = '✕';
+      rm.onclick = () => toggleCompare(id);
+      chip.appendChild(rm);
+      chipsEl.appendChild(chip);
+    } else {
+      const slot_el = document.createElement('div');
+      slot_el.className = 'cmp-slot';
+      slot_el.textContent = '+ Add car';
+      chipsEl.appendChild(slot_el);
+    }
+  });
+}
+
+function clearCompare() {
+  compareList = [];
+  renderCompareBar();
+  document.querySelectorAll('.cmp-btn').forEach(btn => {
+    btn.className = 'cmp-btn';
+    btn.textContent = '⊕';
+    btn.title = 'Add to compare (max 3)';
+  });
+}
+
+function openCompare() {
+  if (compareList.length < 2) return;
+  const cars = compareList.map(id => allListings.find(x => x.id === id)).filter(Boolean);
+  const n = cars.length;
+
+  // Pre-compute deal scores
+  const activePrices = allListings.filter(l => l.is_active && l.price).map(l => l.price);
+  const marketAvg = activePrices.length ? activePrices.reduce((a,b)=>a+b,0)/activePrices.length : 0;
+  cars.forEach(c => { c._cmpScore = getDealScore(c, marketAvg); });
+
+  const content = document.getElementById('cmp-content');
+  content.innerHTML = '';
+
+  // Grid column template: label col + N car cols
+  const colTemplate = `160px ${Array(n).fill('1fr').join(' ')}`;
+
+  const grid = document.createElement('div');
+  grid.className = 'cmp-grid';
+  grid.style.gridTemplateColumns = '1px'; // handled per row
+
+  // Helper to create a row
+  function makeRow(labelText, values, opts = {}) {
+    const row = document.createElement('div');
+    row.className = 'cmp-row';
+    row.style.gridTemplateColumns = colTemplate;
+
+    const label = document.createElement('div');
+    label.className = 'cmp-cell row-label';
+    label.textContent = labelText;
+    row.appendChild(label);
+
+    // Find best/worst for highlighting
+    const nums = values.map(v => typeof v === 'object' ? v._num : null);
+    const validNums = nums.filter(v => v !== null && !isNaN(v));
+    let bestNum = null, worstNum = null;
+    if (validNums.length > 1 && opts.highlight) {
+      bestNum = opts.highlight === 'low' ? Math.min(...validNums) : Math.max(...validNums);
+      worstNum = opts.highlight === 'low' ? Math.max(...validNums) : Math.min(...validNums);
+    }
+
+    values.forEach((v, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'cmp-cell';
+      const num = typeof v === 'object' ? v._num : null;
+      const display = typeof v === 'object' ? v.text : v;
+      if (num !== null && bestNum !== null && num === bestNum) cell.classList.add('best');
+      else if (num !== null && worstNum !== null && num === worstNum) cell.classList.add('worst');
+      cell.textContent = display || '—';
+      row.appendChild(cell);
+    });
+    return row;
+  }
+
+  // ── Header row (images + titles) ────────────────────────────────────────
+  const headerRow = document.createElement('div');
+  headerRow.className = 'cmp-row header-row';
+  headerRow.style.gridTemplateColumns = colTemplate;
+  // Empty label cell
+  const emptyLabel = document.createElement('div');
+  emptyLabel.className = 'cmp-cell row-label';
+  headerRow.appendChild(emptyLabel);
+  cars.forEach(c => {
+    const cell = document.createElement('div');
+    cell.className = 'cmp-header-cell';
+    if (c.image) {
+      const img = document.createElement('img');
+      img.src = c.image;
+      img.style.cssText = 'width:100%;height:80px;object-fit:cover;border-radius:3px;border:1px solid var(--border)';
+      img.onerror = function() { this.style.display='none'; };
+      cell.appendChild(img);
+    }
+    const titleEl = document.createElement('a');
+    titleEl.href = c.url || '#';
+    titleEl.target = '_blank';
+    titleEl.style.cssText = 'font-size:12px;font-weight:600;color:var(--text);text-decoration:none';
+    titleEl.textContent = (c.title || 'Unknown') + ' ↗';
+    cell.appendChild(titleEl);
+    const src = document.createElement('div');
+    src.style.cssText = 'font-size:10px;color:var(--muted);font-family:monospace';
+    src.textContent = c.source || 'AutoTrader';
+    cell.appendChild(src);
+    headerRow.appendChild(cell);
+  });
+  grid.appendChild(headerRow);
+
+  // ── Data rows ────────────────────────────────────────────────────────────
+  const rows = [
+    ['ASKING PRICE',  cars.map(c => ({ _num: c.price, text: fmt(c.price) })), { highlight: 'low' }],
+    ['YEAR',          cars.map(c => ({ _num: parseInt(c.year), text: c.year || '—' })), { highlight: 'high' }],
+    ['MILEAGE',       cars.map(c => ({ _num: c.mileage, text: c.mileage ? Number(c.mileage).toLocaleString() + ' km' : '—' })), { highlight: 'low' }],
+    ['VARIANT',       cars.map(c => c.variant || '—'), {}],
+    ['LOCATION',      cars.map(c => c.location || '—'), {}],
+    ['DEALER',        cars.map(c => c.dealer || '—'), {}],
+    ['DEAL SCORE',    cars.map(c => ({ _num: c._cmpScore, text: c._cmpScore ? String(c._cmpScore) : '—' })), { highlight: 'high' }],
+    ['PRICE DROP',    cars.map(c => {
+      if (!c.prev_price || c.price >= c.prev_price) return { _num: 0, text: 'None' };
+      return { _num: c.prev_price - c.price, text: `▼ ${fmt(c.prev_price - c.price)}` };
+    }), { highlight: 'high' }],
+    ['DAYS LISTED',   cars.map(c => {
+      if (!c.first_seen) return '—';
+      const end = (c.is_active || !c.last_seen) ? new Date() : new Date(c.last_seen);
+      const d = Math.floor((end - new Date(c.first_seen)) / 86400000);
+      return { _num: d, text: d + 'd' };
+    }), {}],
+    ['EST. MONTHLY',  cars.map(c => {
+      if (!c.price) return '—';
+      const P = Math.max(0, c.price - 50000);
+      const r = 0.125 / 12;
+      const n = 60;
+      const m = P * r * Math.pow(1+r,n) / (Math.pow(1+r,n) - 1);
+      return { _num: Math.round(m), text: fmt(Math.round(m)) + '/mo' };
+    }), { highlight: 'low' }],
+    ['VS MARKET AVG', cars.map(c => {
+      if (!c.price || !marketAvg) return '—';
+      const diff = ((c.price - marketAvg) / marketAvg * 100).toFixed(1);
+      return { _num: parseFloat(diff), text: (diff > 0 ? '▲ +' : '▼ ') + diff + '%' };
+    }), { highlight: 'low' }],
+  ];
+
+  rows.forEach(([label, values, opts]) => {
+    grid.appendChild(makeRow(label, values, opts));
+  });
+
+  content.appendChild(grid);
+
+  const note = document.createElement('div');
+  note.style.cssText = 'font-size:11px;color:var(--dim);margin-top:12px';
+  note.textContent = 'Green = best value · Red = worst value · Est. Monthly assumes R50k deposit, 60 months at 12.5%';
+  content.appendChild(note);
+
+  document.getElementById('cmp-modal').classList.add('open');
+}
+
+function closeCompare() {
+  document.getElementById('cmp-modal').classList.remove('open');
+}
+document.getElementById('cmp-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('cmp-modal')) closeCompare();
+});
 
 // ─── HISTORY MODAL ─────────────────────────────────────────────────────────
 async function showHistory(id, title) {
