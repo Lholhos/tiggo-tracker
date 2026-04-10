@@ -25,7 +25,18 @@ from database import (
     toggle_watchlist,
     send_telegram_msg,
     get_telegram_updates,
+    get_pre_approvals,
+    add_pre_approval,
+    update_pre_approval,
+    delete_pre_approval,
+    get_counter_offers,
+    add_counter_offer,
+    delete_counter_offer,
+    get_sold_listings_with_estimates,
+    get_week_of_month_prices,
+    get_variant_stats,
 )
+from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 app.secret_key = "dealradar-secret-x7r2-9v4k"
@@ -49,9 +60,281 @@ def require_auth(f):
         )
     return decorated
 
-# Global scrape state
-_scrape_lock = threading.Lock()
-_scrape_status = {"running": False, "log": [], "run_id": None}
+REPORT_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DealRadar Deal Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {
+    --bg: #080b10;
+    --surface: #0d1117;
+    --border: #30363d;
+    --gold: #d4a843;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --green: #3fb950;
+    --red: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM+Plex+Mono', monospace;
+    margin: 0;
+    padding: 40px;
+    width: 210mm; /* A4 width */
+    min-height: 297mm;
+  }
+  .report-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 2px solid var(--gold);
+    padding-bottom: 20px;
+    margin-bottom: 30px;
+  }
+  .logo { font-size: 24px; font-weight: 700; color: var(--gold); letter-spacing: 2px; }
+  .report-info { text-align: right; color: var(--muted); font-size: 12px; }
+  
+  .listing-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-bottom: 30px;
+  }
+  .listing-title { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+  .listing-meta { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .stat-value { font-size: 18px; font-weight: 600; color: var(--gold); }
+  
+  .market-analysis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px;
+    margin-bottom: 30px;
+  }
+  .section-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--gold);
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .chart-container { height: 200px; margin-bottom: 30px; }
+  
+  .neg-box {
+    background: rgba(212, 168, 67, 0.05);
+    border: 1px solid var(--gold);
+    padding: 20px;
+    margin-bottom: 30px;
+  }
+  .neg-script {
+    font-style: italic;
+    color: var(--text);
+    margin-top: 15px;
+    padding-left: 15px;
+    border-left: 3px solid var(--gold);
+  }
+
+  .similar-deals-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 15px;
+  }
+  .similar-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 12px;
+    font-size: 11px;
+  }
+
+  .footer {
+    margin-top: 50px;
+    font-size: 10px;
+    color: var(--muted);
+    text-align: center;
+    border-top: 1px solid var(--border);
+    padding-top: 20px;
+  }
+</style>
+</head>
+<body>
+  <div class="report-header">
+    <div class="logo">DEALRADAR</div>
+    <div class="report-info">
+      VALUATION REPORT · {{ listing_id }}<br>
+      GENERATED: <span id="gen-date"></span>
+    </div>
+  </div>
+
+  <div id="loading" style="text-align:center; padding:50px; color:var(--muted)">Generating Deal Intel...</div>
+
+  <div id="content" style="display:none">
+    <div class="listing-title" id="l-title">...</div>
+    <div class="listing-meta" id="l-meta">...</div>
+
+    <div class="listing-grid">
+      <div class="stat-card">
+        <div class="stat-label">Current Asking Price</div>
+        <div class="stat-value" id="l-price">...</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Market Context</div>
+        <div class="stat-value" id="l-context">...</div>
+      </div>
+    </div>
+
+    <div class="market-analysis">
+      <div class="section-title">📉 Price History Trends</div>
+      <div class="chart-container">
+        <canvas id="historyChart"></canvas>
+      </div>
+    </div>
+
+    <div class="neg-box">
+      <div class="section-title">🤝 Negotiation Strategy</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px">
+        <div>
+          <div class="stat-label">Opening Offer</div>
+          <div class="stat-value" id="l-opening" style="color:var(--green)">...</div>
+        </div>
+        <div>
+          <div class="stat-label">Target / Walk-away</div>
+          <div class="stat-value" id="l-target">...</div>
+        </div>
+      </div>
+      <div class="stat-label">Suggested Script</div>
+      <div class="neg-script" id="l-script">...</div>
+    </div>
+
+    <div>
+      <div class="section-title">🚗 Similar Market Listings</div>
+      <div class="similar-deals-grid" id="similar-list"></div>
+    </div>
+
+    <div class="footer">
+      DealRadar Price Intelligence · Confidential Dealer Report · Professional Use Only
+    </div>
+  </div>
+
+<script>
+  const listingId = {{ listing_id }};
+  const fmt = (n) => 'R ' + Number(n).toLocaleString('en-ZA');
+
+  async function init() {
+    document.getElementById('gen-date').textContent = new Date().toLocaleDateString('en-ZA', { year:'numeric', month:'long', day:'numeric' });
+    
+    // Fetch Data
+    const listings = await fetch('/api/listings?include_inactive=1').then(r => r.json());
+    const me = listings.find(x => x.id === listingId);
+    if (!me) return;
+
+    const history = await fetch(`/api/listings/${listingId}/history`).then(r => r.json());
+    
+    // Market Avg
+    const activePrices = listings.filter(l => l.is_active && l.price).map(l => l.price);
+    const marketAvg = activePrices.length ? activePrices.reduce((a,b)=>a+b,0)/activePrices.length : 0;
+
+    // Fill UI
+    document.getElementById('l-title').textContent = [me.year, me.title, me.variant].filter(Boolean).join(' ');
+    document.getElementById('l-meta').textContent = `${me.location || 'Anywhere'} · ${me.mileage ? me.mileage.toLocaleString() : '—'} km · ${me.dealer || 'Private Seller'} · ${me.source || 'AutoTrader'}`;
+    document.getElementById('l-price').textContent = fmt(me.price);
+    
+    const diff = marketAvg ? ((me.price - marketAvg) / marketAvg * 100) : 0;
+    document.getElementById('l-context').textContent = `${Math.abs(diff).toFixed(1)}% ${diff > 0 ? 'Above' : 'Below'} Average`;
+    document.getElementById('l-context').style.color = diff > 0 ? 'var(--red)' : 'var(--green)';
+
+    // Negotiation Logic (Clone from app.js)
+    let discount = 0;
+    if (me.first_seen) {
+        const end = (me.is_active || !me.last_seen) ? new Date() : new Date(me.last_seen);
+        const dom = Math.floor((end - new Date(me.first_seen)) / 86400000);
+        if (dom >= 60) discount += 6;
+        else if (dom >= 30) discount += 4;
+        else if (dom >= 15) discount += 2;
+    }
+    if (marketAvg && me.price) {
+        const d = ((me.price - marketAvg) / marketAvg * 100);
+        if (d > 10) discount += 4;
+        else if (d > 5) discount += 2;
+    }
+    const opening = Math.round((me.price * (1 - (discount + 3) / 100)) / 1000) * 1000;
+    const target = Math.round((me.price * (1 - discount / 100)) / 1000) * 1000;
+    
+    document.getElementById('l-opening').textContent = fmt(opening);
+    document.getElementById('l-target').textContent = fmt(target);
+    document.getElementById('l-script').textContent = `"I've done my research and similar vehicles are going for around ${fmt(Math.round(marketAvg/1000)*1000)}. Would you consider ${fmt(opening)}?"`;
+
+    // History Chart
+    new Chart(document.getElementById('historyChart'), {
+      type: 'line',
+      data: {
+        labels: history.map(h => h.scraped_at.slice(0, 10)),
+        datasets: [{
+          data: history.map(h => h.price),
+          borderColor: '#d4a843',
+          backgroundColor: 'rgba(212, 168, 67, 0.1)',
+          fill: true,
+          tension: 0.2,
+          pointRadius: 4,
+          pointBackgroundColor: '#d4a843',
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#30363d' }, ticks: { color: '#7d8590', font: { family: 'IBM Plex Mono', size: 10 } } },
+          y: { grid: { color: '#30363d' }, ticks: { color: '#7d8590', font: { family: 'IBM Plex Mono', size: 10 }, callback: v => 'R' + (v/1000).toFixed(0) + 'k' } }
+        }
+      }
+    });
+
+    // Similar Listings
+    const similar = listings
+        .filter(x => x.id !== listingId && x.price && x.year && x.is_active)
+        .map(x => ({ ...x, _dist: Math.abs(x.price - me.price)/10000 + Math.abs(x.year - me.year)*5 + Math.abs((x.mileage||0) - (me.mileage||0))/10000 }))
+        .sort((a,b) => a._dist - b._dist)
+        .slice(0, 3);
+    
+    const simEl = document.getElementById('similar-list');
+    similar.forEach(s => {
+      const card = document.createElement('div');
+      card.className = 'similar-card';
+      card.innerHTML = `<strong>${s.year} ${s.title}</strong><br><span style="color:var(--muted)">${s.location||'Anywhere'} &middot; ${s.mileage?s.mileage.toLocaleString():'0'}km</span><br><span style="color:var(--gold);font-weight:700">${fmt(s.price)}</span>`;
+      simEl.appendChild(card);
+    });
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  }
+
+  init();
+</script>
+</body>
+</html>
+"""
 
 
 def scheduled_job():
@@ -317,6 +600,119 @@ def toggle_watchlist_route(listing_id):
     return jsonify({"watchlisted": new_state})
 
 
+@app.route("/api/finance/pre-approvals", methods=["GET"])
+@require_auth
+def pre_approvals_get():
+    return jsonify(get_pre_approvals())
+
+
+@app.route("/api/finance/pre-approvals", methods=["POST"])
+@require_auth
+def pre_approvals_add():
+    data = request.json or {}
+    app_id = add_pre_approval(data)
+    return jsonify({"ok": True, "id": app_id})
+
+
+@app.route("/api/finance/pre-approvals/<int:app_id>", methods=["PUT"])
+@require_auth
+def pre_approvals_update(app_id):
+    data = request.json or {}
+    success = update_pre_approval(app_id, data)
+    return jsonify({"ok": success})
+
+
+@app.route("/api/finance/pre-approvals/<int:pre_id>", methods=["DELETE"])
+@require_auth
+def delete_pre_app(pre_id):
+    delete_pre_approval(pre_id)
+    return jsonify({"ok": True})
+
+# ─── COUNTER OFFERS ────────────────────────────────────────────────────────
+@app.route("/api/listings/<int:id>/counter-offers", methods=["GET"])
+@require_auth
+def get_offers(id):
+    return jsonify(get_counter_offers(id))
+
+@app.route("/api/listings/<int:id>/counter-offers", methods=["POST"])
+@require_auth
+def add_offer(id):
+    d = request.json
+    add_counter_offer(
+        id, 
+        d.get("date"), 
+        d.get("my_offer"), 
+        d.get("dealer_counter"), 
+        d.get("notes"), 
+        d.get("status")
+    )
+    return jsonify({"ok": True})
+
+@app.route("/api/counter-offers/<int:offer_id>", methods=["DELETE"])
+@require_auth
+def delete_offer_item(offer_id):
+    delete_counter_offer(offer_id)
+    return jsonify({"ok": True})
+
+# ─── PDF REPORT ────────────────────────────────────────────────────────────
+@app.route("/api/listings/<int:id>/report")
+@require_auth
+def generate_report(id):
+    """
+    Generates a professional PDF Deal Report for a specific listing using Playwright.
+    """
+    from playwright.sync_api import sync_playwright
+    import time
+    
+    host = request.host_url.rstrip("/")
+    report_url = f"{host}/report/{id}"
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 1600})
+        
+        page.goto(report_url, wait_until="networkidle")
+        time.sleep(1) 
+        
+        pdf_bytes = page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "20px", "right": "20px", "bottom": "20px", "left": "20px"}
+        )
+        browser.close()
+    
+    from flask import make_response
+    response = make_response(pdf_bytes)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=DealRadar_Report_{id}.pdf'
+    return response
+
+@app.route("/report/<int:id>")
+@require_auth
+def report_view(id):
+    return render_template_string(REPORT_HTML, listing_id=id)
+
+
+# ─── INTELLIGENCE ─────────────────────────────────────────────────────────
+@app.route("/api/intelligence/sold")
+@require_auth
+def intel_sold():
+    return jsonify(get_sold_listings_with_estimates())
+
+@app.route("/api/intelligence/seasonal")
+@require_auth
+def intel_seasonal():
+    return jsonify({
+        "dow": get_day_of_week_prices(),
+        "wom": get_week_of_month_prices()
+    })
+
+@app.route("/api/intelligence/variants")
+@require_auth
+def intel_variants():
+    return jsonify(get_variant_stats())
+
+
 # ---------------------------------------------------------------------------
 # Frontend HTML (single-file, self-contained)
 # ---------------------------------------------------------------------------
@@ -343,6 +739,7 @@ HTML = """<!DOCTYPE html>
     --text: #e6edf3;
     --muted: #7d8590;
     --dim: #3d444d;
+    --yellow: #f1e05a;
   }
 
   [data-theme="light"] {
@@ -904,6 +1301,128 @@ HTML = """<!DOCTYPE html>
     letter-spacing: 1px;
     text-transform: uppercase;
   }
+
+  /* FINANCE TAB */
+  .finance-grid {
+    display: grid;
+    grid-template-columns: 350px 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  .finance-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .finance-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--gold);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .finance-input-group {
+    margin-bottom: 16px;
+  }
+  .finance-input-group label {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .finance-input-group input, .finance-input-group select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    padding: 10px 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    outline: none;
+  }
+  .finance-result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .finance-result-row:last-child { border-bottom: none; }
+  .finance-result-label { font-size: 12px; color: var(--muted); }
+  .finance-result-value { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; color: var(--text); }
+  .finance-result-value.gold { color: var(--gold); }
+
+  .status-badge {
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 2px;
+  }
+  .status-badge.approved { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .status-badge.declined { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .status-badge.pending { background: rgba(241,224,90,0.15); color: var(--yellow); border: 1px solid rgba(241,224,90,0.3); }
+
+  .finance-table th { font-size: 9px; }
+  .finance-table td { font-size: 12px; font-family: 'IBM Plex Mono', monospace; }
+  
+  .action-btn {
+    background: none;
+    border: 1px solid var(--border2);
+    color: var(--muted);
+    padding: 4px 8px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .action-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+  /* COUNTER OFFERS */
+  .offer-row {
+    border-bottom: 1px solid var(--border);
+    padding: 12px 0;
+  }
+  .offer-row:last-child { border-bottom: none; }
+  .offer-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .offer-status {
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 2px;
+  }
+  .status-ongoing { background: rgba(212,168,67,0.15); color: var(--gold); border: 1px solid rgba(212,168,67,0.3); }
+  .status-accepted { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .status-walked { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+  
+  .print-btn {
+    background: var(--gold);
+    color: #080b10;
+    border: none;
+    padding: 10px 16px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .print-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -981,6 +1500,7 @@ HTML = """<!DOCTYPE html>
     <button class="tab-btn" onclick="setTab('dealers', this)">Dealers</button>
     <button class="tab-btn" onclick="setTab('charts', this)">Charts</button>
     <button class="tab-btn" onclick="setTab('price-changes', this)">Price Changes</button>
+    <button class="tab-btn" onclick="setTab('finance', this)">Finance</button>
     <button class="tab-btn" onclick="setTab('runs', this)">Scrape History</button>
   </div>
 
@@ -1050,20 +1570,64 @@ HTML = """<!DOCTYPE html>
 
   <!-- Charts Tab -->
   <div id="tab-charts" style="display:none">
+    
+    <!-- Sold Listings Intelligence -->
+    <div style="background:var(--surface); border:1px solid var(--border); padding:24px; margin-bottom:24px">
+      <div class="chart-title" style="margin-bottom:16px; display:flex; align-items:center; gap:10px">
+        <span style="font-size:16px">🏷️</span> Sold Price Estimator
+        <span style="font-size:10px; color:var(--muted); font-weight:normal; text-transform:none; margin-left:auto">Likely sold based on inactivity. Estimates include DOM & drop weighted factors.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="finance-table" style="font-size:11px">
+          <thead>
+            <tr>
+              <th>Vehicle / Source</th>
+              <th>First Seen</th>
+              <th>Last Seen</th>
+              <th>Days</th>
+              <th>Last Listed</th>
+              <th>Drops</th>
+              <th style="color:var(--gold)">Est. Sold Price</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="sold-tbody">
+            <tr><td colspan="8" style="text-align:center; padding:30px; color:var(--dim)">Calculating market exit signals...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="chart-grid">
-      <div class="chart-card" style="grid-column:1/-1">
+      <!-- Seasonal Intelligence -->
+      <div class="chart-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <div class="chart-title" style="margin-bottom:0">Market Average Price · Historical + 30-Day Forecast</div>
-          <div id="forecast-badge" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 10px;border-radius:3px;border:1px solid"></div>
+          <div class="chart-title" style="margin-bottom:0">Seasonal Buy-Signals · Day of Week</div>
+          <div id="best-dow-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--green)"></div>
         </div>
-        <canvas id="chart-forecast" height="120"></canvas>
+        <canvas id="chart-dow-new" height="200"></canvas>
       </div>
       <div class="chart-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <div class="chart-title" style="margin-bottom:0">Best Time to Buy · Avg Price by Day</div>
-          <div id="best-day-badge" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 10px;border-radius:3px;border:1px solid var(--border2);color:var(--green)"></div>
+          <div class="chart-title" style="margin-bottom:0">Seasonal Buy-Signals · Week of Month</div>
+          <div id="best-wom-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gold)"></div>
         </div>
-        <canvas id="chart-dow" height="200"></canvas>
+        <canvas id="chart-wom" height="200"></canvas>
+      </div>
+
+      <!-- Variant Breakdown -->
+      <div class="chart-card" style="grid-column:1/-1">
+        <div class="chart-title">Variant Value Analysis · Avg Price by Trim/Spec</div>
+        <canvas id="chart-variant-analysis" height="100"></canvas>
+      </div>
+
+      <!-- Existing Charts -->
+      <div class="chart-card" style="grid-column:1/-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:0">Historical Price Trend + 30-Day Forecast</div>
+          <div id="forecast-badge" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 10px;border-radius:3px;border:1px solid"></div>
+        </div>
+        <canvas id="chart-forecast" height="120"></canvas>
       </div>
       <div class="chart-card">
         <div class="chart-title">Price vs Mileage · Current Listings</div>
@@ -1078,32 +1642,25 @@ HTML = """<!DOCTYPE html>
         <canvas id="chart-year" height="200"></canvas>
       </div>
       <div class="chart-card" style="grid-column:1/-1">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <div class="chart-title" style="margin-bottom:0">Market Heat Map · Avg Price by Location</div>
-          <div id="heatmap-badge" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 10px;border-radius:3px;border:1px solid var(--border2);color:var(--green)"></div>
-        </div>
+        <div class="chart-title">Market Heat Map · Avg Price by Location</div>
         <canvas id="chart-heatmap" height="80"></canvas>
-      </div>
-      <div class="chart-card" style="grid-column:1/-1">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <div class="chart-title" style="margin-bottom:0">Price Change Activity · Drops vs Rises per Day</div>
-          <div id="pc-activity-badge" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)"></div>
-        </div>
-        <canvas id="chart-pc-activity" height="100"></canvas>
-      </div>
-      <div class="chart-card" style="grid-column:1/-1">
-        <div class="chart-title" style="margin-bottom:16px">Biggest Price Drops · Top 15 All-Time</div>
-        <canvas id="chart-pc-top" height="80"></canvas>
       </div>
     </div>
   </div>
 
   <!-- Price Changes Tab -->
   <div id="tab-price-changes" style="display:none">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:20px;margin-bottom:12px">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600;margin-bottom:12px">DAILY SUMMARY</div>
+      <div id="pc-daily" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px"></div>
+    </div>
     <div style="background:var(--surface);border:1px solid var(--border);padding:20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div style="font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600">ALL PRICE CHANGES — FULL HISTORY</div>
-        <div id="pc-summary" style="font-size:12px;color:var(--muted)"></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div id="pc-filter-badge" style="font-size:11px;color:var(--gold)"></div>
+          <div id="pc-summary" style="font-size:12px;color:var(--muted)"></div>
+        </div>
       </div>
       <div id="pc-list"><div style="color:var(--muted);font-size:12px;padding:20px 0">Loading…</div></div>
     </div>
@@ -1116,6 +1673,192 @@ HTML = """<!DOCTYPE html>
         <div>STARTED</div><div>STATUS</div><div>FOUND</div><div>NEW</div><div>CHANGES</div><div>DURATION</div>
       </div>
       <div id="runs-list"><div style="color:var(--dim);font-family:monospace;font-size:12px;padding:20px 0">No runs yet</div></div>
+    </div>
+  </div>
+
+  <!-- Finance Tab -->
+  <div id="tab-finance" style="display:none">
+    <div class="finance-grid">
+      <!-- Calculators Column -->
+      <div class="finance-left">
+        <!-- Affordability Calculator -->
+        <div class="finance-card">
+          <div class="finance-title">
+            <span style="font-size:16px">🧮</span> Affordability Calculator
+          </div>
+          <div class="finance-input-group">
+            <label>Gross Monthly Salary (R)</label>
+            <input type="number" id="calc-gross" value="45000" oninput="calcAffordability()">
+          </div>
+          <div class="finance-input-group">
+            <label>Net Monthly Income (R)</label>
+            <input type="number" id="calc-net" value="32000" oninput="calcAffordability()">
+          </div>
+          <div class="finance-input-group">
+            <label>Suggested Deposit (R)</label>
+            <input type="number" id="calc-deposit" value="50000" oninput="calcAffordability()">
+          </div>
+          <div class="finance-input-group">
+            <label>Preferred Term (Months)</label>
+            <select id="calc-term" onchange="calcAffordability()">
+              <option value="48">48 months</option>
+              <option value="60" selected>60 months</option>
+              <option value="72">72 months</option>
+              <option value="84">84 months</option>
+            </select>
+          </div>
+          
+          <div style="margin-top:24px; padding-top:16px; border-top:1px dashed var(--border2)">
+            <div class="finance-result-row">
+              <div class="finance-result-label">Recommended Max Price</div>
+              <div class="finance-result-value gold" id="res-max-price">R0</div>
+            </div>
+            <div class="finance-result-row">
+              <div class="finance-result-label">Max Monthly Instalment (20%)</div>
+              <div class="finance-result-value" id="res-max-instalment">R0</div>
+            </div>
+            <div class="finance-result-row">
+              <div class="finance-result-label">Total Repayment Amount</div>
+              <div class="finance-result-value" id="res-total-repay">R0</div>
+            </div>
+          </div>
+          <div style="margin-top:16px; font-size:11px; color:var(--muted); font-style:italic">
+            *Based on 20% of net income rule and average market rates.
+          </div>
+        </div>
+
+        <!-- Bank Rate Comparsion Inputs (Syncs with the table) -->
+        <div class="finance-card">
+          <div class="finance-title">
+            <span style="font-size:16px">⚖️</span> Loan Comparison Settings
+          </div>
+          <div class="finance-input-group">
+            <label>Vehicle Price (R)</label>
+            <input type="number" id="comp-price" value="350000" oninput="renderBankComparison()">
+          </div>
+          <div class="finance-input-group">
+            <label>Deposit (R)</label>
+            <input type="number" id="comp-deposit" value="50000" oninput="renderBankComparison()">
+          </div>
+          <div class="finance-input-group">
+            <label>Loan Term (Months)</label>
+            <select id="comp-term" onchange="renderBankComparison()">
+              <option value="48">48 months</option>
+              <option value="60" selected>60 months</option>
+              <option value="72">72 months</option>
+              <option value="84">84 months</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tables Column -->
+      <div class="finance-right">
+        <!-- Pre-approval Tracker -->
+        <div class="finance-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px">
+            <div class="finance-title" style="margin-bottom:0">
+              <span style="font-size:16px">🏦</span> Pre-approval Tracker
+            </div>
+            <button class="action-btn" onclick="openPreApprovalModal()" style="padding:6px 12px; border-radius:4px; background:var(--gold); color:#080b10; font-weight:700">Add Application</button>
+          </div>
+          <div class="table-wrap">
+            <table class="finance-table">
+              <thead>
+                <tr>
+                  <th>Bank</th>
+                  <th>Date</th>
+                  <th>Amount</th>
+                  <th>Rate</th>
+                  <th>Instalment</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="pre-approval-tbody">
+                <tr><td colspan="8" style="text-align:center; padding:40px; color:var(--dim)">No applications logged yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Bank Rate Comparison -->
+        <div class="finance-card">
+          <div class="finance-title">
+            <span style="font-size:16px">📊</span> Bank Rate Comparison
+          </div>
+          <div class="table-wrap">
+            <table class="finance-table">
+              <thead>
+                <tr>
+                  <th>Bank</th>
+                  <th>Interest Rate</th>
+                  <th>Monthly Instalment</th>
+                  <th>Total Repayment</th>
+                  <th>Total Interest</th>
+                </tr>
+              </thead>
+              <tbody id="bank-comp-tbody">
+                <!-- Dynamically Rendered -->
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:16px; font-size:11px; color:var(--muted)">
+             Average market rates pre-filled. You can edit rates in the Pre-approval tracker above for accuracy.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pre-approval Modal -->
+  <div class="modal-overlay" id="pre-approval-modal">
+    <div class="modal" style="width:450px">
+      <div class="modal-title" id="pre-title">Add Pre-approval</div>
+      <div class="modal-subtitle">Log your bank application results.</div>
+      
+      <div class="finance-input-group">
+        <label>Bank Name</label>
+        <input type="text" id="pre-bank" placeholder="e.g. WesBank">
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
+        <div class="finance-input-group">
+          <label>Date Applied</label>
+          <input type="date" id="pre-date">
+        </div>
+        <div class="finance-input-group">
+          <label>Status</label>
+          <select id="pre-status">
+            <option value="Pending">Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Declined">Declined</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
+        <div class="finance-input-group">
+          <label>Amount (R)</label>
+          <input type="number" id="pre-amount">
+        </div>
+        <div class="finance-input-group">
+          <label>Interest Rate (%)</label>
+          <input type="number" id="pre-rate" step="0.1" value="11.75">
+        </div>
+      </div>
+      <div class="finance-input-group">
+        <label>Monthly Instalment (Estimated/Actual)</label>
+        <input type="number" id="pre-instalment">
+      </div>
+      <div class="finance-input-group">
+        <label>Notes</label>
+        <input type="text" id="pre-notes" placeholder="e.g. Includes balloon payment">
+      </div>
+
+      <div style="display:flex; gap:12px; margin-top:20px">
+        <button class="action-btn" onclick="savePreApproval()" style="flex:1; background:var(--gold); color:#080b10; font-weight:700; padding:10px">Save Application</button>
+        <button class="action-btn" onclick="closePreApprovalModal()" style="flex:1; padding:10px">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -1163,6 +1906,13 @@ HTML = """<!DOCTYPE html>
   <div class="modal" style="width:600px">
     <div class="modal-title" id="modal-title">Price History</div>
     <div class="modal-subtitle" id="modal-subtitle"></div>
+
+    <div style="display:flex; justify-content:flex-end; margin-bottom:16px">
+      <button id="report-btn" class="print-btn" onclick="downloadReport()">
+        <span>📄</span> Download Deal Report
+      </button>
+    </div>
+
     <canvas id="chart-history" height="180"></canvas>
     
     <!-- Similar Deals -->
@@ -1212,6 +1962,42 @@ HTML = """<!DOCTYPE html>
         </div>
       </div>
       <div id="oc-results"></div>
+    </div>
+
+    <!-- Negotiation Log (Counter Offer Tracker) -->
+    <div id="counter-offer-wrap" style="margin-top:24px;">
+      <div style="font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text);border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:12px">Negotiation Log</div>
+      
+      <!-- New Offer Form -->
+      <div style="background:rgba(212,168,67,0.05); border:1px solid var(--border); padding:16px; margin-bottom:16px">
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:12px">
+          <div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px">MY OFFER (R)</div>
+            <input id="co-my-offer" type="number" step="1000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;font-size:12px">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px">DEALER COUNTER (R)</div>
+            <input id="co-dealer-counter" type="number" step="1000" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;font-size:12px">
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px">STATUS</div>
+            <select id="co-status" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;font-size:12px">
+              <option value="ongoing">Ongoing</option>
+              <option value="accepted">Accepted</option>
+              <option value="walked away">Walked Away</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px">
+          <input id="co-notes" type="text" placeholder="Add some notes..." style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;font-size:12px">
+          <button class="action-btn" onclick="saveCounterOffer()" style="background:var(--gold); color:#080b10; font-weight:700">Log Offer</button>
+        </div>
+      </div>
+
+      <!-- Offer History List -->
+      <div id="counter-offer-list">
+        <!-- Dynamically filled -->
+      </div>
     </div>
 
     <button class="modal-close" style="margin-top:24px" onclick="closeModal()">Close</button>
@@ -1513,10 +2299,16 @@ function setTab(name, btn) {
   document.getElementById('tab-price-changes').style.display = name === 'price-changes' ? 'block' : 'none';
   document.getElementById('tab-runs').style.display = name === 'runs' ? 'block' : 'none';
   document.getElementById('tab-dealers').style.display = name === 'dealers' ? 'block' : 'none';
+  document.getElementById('tab-finance').style.display = name === 'finance' ? 'block' : 'none';
   if (name === 'charts') setTimeout(renderCharts, 0);
   if (name === 'price-changes') loadPriceChanges();
   if (name === 'runs') loadRuns();
   if (name === 'dealers') renderDealers();
+  if (name === 'finance') {
+    calcAffordability();
+    renderBankComparison();
+    loadPreApprovals();
+  }
 }
 
 // ─── FILTERS ───────────────────────────────────────────────────────────────
@@ -1743,6 +2535,17 @@ function renderTable() {
     l._dealScore = getDealScore(l, avg);
     l._priceDrop = (l.prev_price && l.price < l.prev_price) ? (l.prev_price - l.price) : 0;
     l._distKm = getDistKm(l.location);
+    
+    // ENHANCED TRAIT DETECTION
+    if (!l._detectedVariant) {
+        const title = (l.title || "").toUpperCase();
+        const TRAITS = ["EXECUTIVE", "LUXURY", "DISTINCT", "AWD", "2WD", "CVT", "DCT", "PRO"];
+        let detected = [];
+        TRAITS.forEach(v => {
+            if (title.includes(v)) detected.push(v.charAt(0) + v.slice(1).toLowerCase());
+        });
+        l._detectedVariant = detected.join(" ") || l.variant || "Standard";
+    }
   });
 
   data.sort((a, b) => {
@@ -1890,13 +2693,19 @@ function renderTable() {
     
     divListingText.appendChild(divTitle);
     divListingText.appendChild(divMeta);
+    if (!l.is_active) {
+        const soldLabel = document.createElement('div');
+        soldLabel.style.cssText = 'font-size:10px;color:var(--red);margin-top:2px;font-weight:bold';
+        soldLabel.textContent = 'LIKELY SOLD';
+        divListingText.appendChild(soldLabel);
+    }
     tdListing.appendChild(divListingText);
     tr.appendChild(tdListing);
 
     // 2b. Variant
     const tdMod = document.createElement('td');
     tdMod.style.fontFamily = 'monospace';
-    tdMod.textContent = l.variant || '—';
+    tdMod.textContent = l._detectedVariant || '—';
     tr.appendChild(tdMod);
 
     // 3. Source
@@ -2028,10 +2837,19 @@ const chartDefaults = {
 };
 
 async function renderCharts() {
-  const [marketRes, analyticsRes] = await Promise.all([
+  // Fetch All Intelligence and Market data in parallel
+  const [marketRes, analyticsRes, soldData, seasonalData, variantData] = await Promise.all([
     fetch('/api/market').then(r => r.json()),
     fetch('/api/analytics').then(r => r.json()),
+    fetch('/api/intelligence/sold').then(r => r.json()),
+    fetch('/api/intelligence/seasonal').then(r => r.json()),
+    fetch('/api/intelligence/variants').then(r => r.json()),
   ]);
+
+  renderSoldEstimates(soldData);
+  renderSeasonalCharts(seasonalData);
+  renderVariantAnalysis(variantData);
+
   const market = marketRes.chart;
   const vel = marketRes.velocity_30d;
   const forecast = analyticsRes.forecast || [];
@@ -2398,6 +3216,130 @@ async function renderCharts() {
     }
   }
 }
+
+function renderSoldEstimates(data) {
+  const tbody = document.getElementById('sold-tbody');
+  if (!data || !data.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--dim)">No market exit events detected yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = data.map(l => `
+    <tr>
+      <td>
+        <div style="font-weight:600">${l.title}</div>
+        <div style="font-size:10px; color:var(--muted)">${l.source} · ${l.dealer}</div>
+      </td>
+      <td>${l.first_seen.split('T')[0]}</td>
+      <td>${l.last_seen.split('T')[0]}</td>
+      <td>${l.dom} days</td>
+      <td>${fmt(l.last_price)}</td>
+      <td>${l.drop_count}</td>
+      <td style="color:var(--gold); font-weight:bold">${fmt(l.estimated_sold_price)}</td>
+      <td><button class="action-btn" onclick="showHistory(${l.id}, '${l.title}')">History</button></td>
+    </tr>
+  `).join('');
+}
+
+function renderSeasonalCharts(data) {
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  
+  // Day of Week
+  if (data.dow && data.dow.length) {
+    const minPrice = Math.min(...data.dow.map(d => d.avg_price));
+    const bestRow = data.dow.find(d => d.avg_price === minPrice);
+    const badge = document.getElementById('best-dow-badge');
+    if (bestRow) {
+      badge.textContent = `Shop on ${DAY_NAMES[bestRow.dow]} (Avg R${Math.round(minPrice/1000)}k)`;
+    }
+
+    if (charts.dowNew) charts.dowNew.destroy();
+    charts.dowNew = new Chart(document.getElementById('chart-dow-new'), {
+      type: 'bar',
+      data: {
+        labels: data.dow.map(d => DAY_NAMES[d.dow]),
+        datasets: [{
+          data: data.dow.map(d => d.avg_price),
+          backgroundColor: data.dow.map(d => d.avg_price === minPrice ? 'rgba(63,185,80,0.6)' : 'rgba(212,168,67,0.3)'),
+          borderColor: data.dow.map(d => d.avg_price === minPrice ? '#3fb950' : '#d4a843'),
+          borderWidth: 1
+        }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: false, ticks: { callback: v => 'R' + (v/1000).toFixed(0) + 'k' } } }
+      }
+    });
+  }
+
+  // Week of Month
+  if (data.wom && data.wom.length) {
+    const minPrice = Math.min(...data.wom.map(d => d.avg_price));
+    const bestRow = data.wom.find(d => d.avg_price === minPrice);
+    const badge = document.getElementById('best-wom-badge');
+    if (bestRow) {
+      badge.textContent = `Buying in Week ${bestRow.wom} saves ~R${Math.round((data.wom[0].avg_price - minPrice)/1000)}k`;
+    }
+
+    if (charts.wom) charts.wom.destroy();
+    charts.wom = new Chart(document.getElementById('chart-wom'), {
+      type: 'line',
+      data: {
+        labels: data.wom.map(d => 'Week ' + d.wom),
+        datasets: [{
+          data: data.wom.map(d => d.avg_price),
+          borderColor: '#d4a843',
+          backgroundColor: 'rgba(212,168,67,0.1)',
+          fill: true,
+          tension: 0.4
+        }]
+      },
+      options: {
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: false, ticks: { callback: v => 'R' + (v/1000).toFixed(0) + 'k' } } }
+      }
+    });
+  }
+}
+
+function renderVariantAnalysis(data) {
+  if (!data || !data.length) return;
+
+  if (charts.variantAnalysis) charts.variantAnalysis.destroy();
+  charts.variantAnalysis = new Chart(document.getElementById('chart-variant-analysis'), {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d.variant),
+      datasets: [{
+        label: 'Avg Price',
+        data: data.map(d => d.avg_price),
+        backgroundColor: 'rgba(212,168,67,0.5)',
+        borderColor: '#d4a843',
+        borderWidth: 1
+      }, {
+        label: 'Low Entry',
+        data: data.map(d => d.min_price),
+        backgroundColor: 'rgba(63,185,80,0.3)',
+        borderColor: '#3fb950',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      plugins: { 
+        legend: { display: true, labels: { color: '#7d8590', font: { family: 'IBM Plex Mono', size: 10 } } },
+        tooltip: {
+            callbacks: {
+                label: ctx => ` ${ctx.dataset.label}: R${ctx.raw.toLocaleString()} (${data[ctx.dataIndex].count} listings)`
+            }
+        }
+      },
+      scales: {
+        y: { ticks: { callback: v => 'R' + (v/1000).toFixed(0) + 'k' } }
+      }
+    }
+  });
+}
+
 
 // ─── NEGOTIATION HELPER ─────────────────────────────────────────────────────
 function renderNegHelper(l, avgPrice) {
@@ -2838,6 +3780,114 @@ async function showHistory(id, title) {
     document.getElementById('neg-helper-wrap').style.display = 'none';
     document.getElementById('ownership-wrap').style.display = 'none';
   }
+
+  // Counter Offers
+  currentListingId = id; // Store for the save function
+  loadCounterOffers(id);
+}
+
+let currentListingId = null;
+
+async function downloadReport() {
+    const btn = document.getElementById('report-btn');
+    const oldHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳</span> Generating...';
+
+    const url = `/api/listings/${currentListingId}/report`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Report generation failed');
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `DealRadar_Report_${currentListingId}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    } catch (e) {
+        alert('Could not generate PDF. Make sure the server is healthy.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = oldHtml;
+    }
+}
+
+async function loadCounterOffers(listingId) {
+    const res = await fetch(`/api/listings/${listingId}/counter-offers`);
+    const offers = await res.json();
+    const listEl = document.getElementById('counter-offer-list');
+    listEl.innerHTML = '';
+    
+    if (offers.length === 0) {
+        listEl.innerHTML = '<div style="font-size:11px;color:var(--dim);text-align:center;padding:10px">No negotiation history yet.</div>';
+        return;
+    }
+
+    offers.forEach(o => {
+        const statusClass = 'status-' + o.status.replace(' ', '-');
+        const row = document.createElement('div');
+        row.className = 'offer-row';
+        row.innerHTML = `
+          <div class="offer-header">
+            <div style="font-size:11px;color:var(--muted)">${o.date}</div>
+            <div class="offer-status ${statusClass}">${o.status}</div>
+          </div>
+          <div style="display:flex; gap:20px; margin-bottom:6px">
+            <div>
+              <div style="font-size:9px;color:var(--muted)">MY OFFER</div>
+              <div style="font-size:14px;font-weight:700;color:var(--green)">${fmt(o.my_offer)}</div>
+            </div>
+            <div>
+              <div style="font-size:9px;color:var(--muted)">DEALER</div>
+              <div style="font-size:14px;font-weight:700;color:var(--red)">${fmt(o.dealer_counter)}</div>
+            </div>
+            <div style="flex:1; text-align:right">
+               <button class="action-btn" onclick="deleteCounterOffer(${o.id})" style="color:var(--dim); border:none">✕</button>
+            </div>
+          </div>
+          ${o.notes ? `<div style="font-size:11px;color:var(--text);font-style:italic">"${o.notes}"</div>` : ''}
+        `;
+        listEl.appendChild(row);
+    });
+}
+
+async function saveCounterOffer() {
+    const myOffer = document.getElementById('co-my-offer').value;
+    const dealerCounter = document.getElementById('co-dealer-counter').value;
+    const status = document.getElementById('co-status').value;
+    const notes = document.getElementById('co-notes').value.trim();
+
+    if (!myOffer) { alert('Please enter your offer amount.'); return; }
+
+    const data = {
+        date: new Date().toISOString().split('T')[0],
+        my_offer: parseFloat(myOffer),
+        dealer_counter: dealerCounter ? parseFloat(dealerCounter) : null,
+        status: status,
+        notes: notes
+    };
+
+    const res = await fetch(`/api/listings/${currentListingId}/counter-offers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+
+    if (res.ok) {
+        // Clear form
+        document.getElementById('co-my-offer').value = '';
+        document.getElementById('co-dealer-counter').value = '';
+        document.getElementById('co-notes').value = '';
+        loadCounterOffers(currentListingId);
+    }
+}
+
+async function deleteCounterOffer(id) {
+    if (!confirm('Delete this negotiation log entry?')) return;
+    const res = await fetch(`/api/counter-offers/${id}`, { method: 'DELETE' });
+    if (res.ok) loadCounterOffers(currentListingId);
 }
 
 function closeModal() {
@@ -2873,34 +3923,76 @@ async function loadRuns() {
 }
 
 // ─── PRICE CHANGES ─────────────────────────────────────────────────────────
-async function loadPriceChanges() {
+let _pcAllChanges = [];
+
+async function loadPriceChanges(filterDate) {
   const el = document.getElementById('pc-list');
   const sumEl = document.getElementById('pc-summary');
+  const dailyEl = document.getElementById('pc-daily');
+  const badgeEl = document.getElementById('pc-filter-badge');
   el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px 0">Loading…</div>';
 
-  const changes = await fetch('/api/price-changes').then(r => r.json());
+  if (!_pcAllChanges.length || !filterDate) {
+    _pcAllChanges = await fetch('/api/price-changes').then(r => r.json());
+  }
+
+  const changes = _pcAllChanges;
 
   if (!changes.length) {
     el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px 0">No price changes recorded yet.</div>';
     sumEl.textContent = '';
+    dailyEl.innerHTML = '';
     return;
   }
 
-  const drops = changes.filter(c => c.new_price < c.old_price).length;
-  const rises = changes.filter(c => c.new_price > c.old_price).length;
-  sumEl.textContent = `${changes.length} total changes · ${drops} drops · ${rises} rises`;
+  // Build daily stats
+  const byDay = {};
+  changes.forEach(c => {
+    const date = c.scraped_at.slice(0, 10);
+    if (!byDay[date]) byDay[date] = { drops: 0, rises: 0, dropAmt: 0, riseAmt: 0, total: 0 };
+    const delta = c.new_price - c.old_price;
+    byDay[date].total++;
+    if (delta < 0) { byDay[date].drops++; byDay[date].dropAmt += Math.abs(delta); }
+    else { byDay[date].rises++; byDay[date].riseAmt += delta; }
+  });
+
+  // Render daily summary cards
+  dailyEl.innerHTML = '';
+  Object.keys(byDay).sort((a,b) => b.localeCompare(a)).forEach(date => {
+    const d = byDay[date];
+    const isActive = filterDate === date;
+    const label = new Date(date + 'T12:00:00').toLocaleDateString('en-ZA', { weekday:'short', day:'numeric', month:'short' });
+    const card = document.createElement('div');
+    card.style.cssText = `background:${isActive ? 'var(--gold)' : 'var(--bg)'};border:1px solid ${isActive ? 'var(--gold)' : 'var(--border)'};padding:12px;cursor:pointer;border-radius:2px`;
+    card.innerHTML = `
+      <div style="font-size:10px;letter-spacing:1px;font-weight:700;color:${isActive ? '#000' : 'var(--muted)'};margin-bottom:6px">${label}</div>
+      <div style="font-size:18px;font-weight:700;color:${isActive ? '#000' : 'var(--text)'};margin-bottom:6px">${d.total} change${d.total !== 1 ? 's' : ''}</div>
+      <div style="display:flex;gap:8px;font-size:11px">
+        ${d.drops ? `<span style="color:${isActive ? '#000' : 'var(--green)'}">▼ ${d.drops} drop${d.drops !== 1 ? 's' : ''} (R${d.dropAmt.toLocaleString()})</span>` : ''}
+        ${d.rises ? `<span style="color:${isActive ? '#000' : 'var(--red)'}">▲ ${d.rises} rise${d.rises !== 1 ? 's' : ''}</span>` : ''}
+      </div>`;
+    card.onclick = () => loadPriceChanges(isActive ? null : date);
+    dailyEl.appendChild(card);
+  });
+
+  // Filter changes for list
+  const filtered = filterDate ? changes.filter(c => c.scraped_at.slice(0, 10) === filterDate) : changes;
+  const drops = filtered.filter(c => c.new_price < c.old_price).length;
+  const rises = filtered.filter(c => c.new_price > c.old_price).length;
+  sumEl.textContent = `${filtered.length} changes · ${drops} drops · ${rises} rises`;
+  badgeEl.textContent = filterDate ? `Filtered: ${new Date(filterDate + 'T12:00:00').toLocaleDateString('en-ZA', {day:'numeric',month:'short',year:'numeric'})} · click card to clear` : '';
 
   // Group by date for visual separation
   let lastDate = null;
   const rows = [];
 
-  changes.forEach(c => {
+  filtered.forEach(c => {
     const date = c.scraped_at.slice(0, 10);
     if (date !== lastDate) {
       lastDate = date;
       const d = document.createElement('div');
       d.style.cssText = 'font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600;padding:14px 0 6px 0;border-bottom:1px solid var(--border)';
-      d.textContent = new Date(date).toLocaleDateString('en-ZA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+      d.textContent = new Date(date + 'T12:00:00').toLocaleDateString('en-ZA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
       rows.push(d);
     }
 
@@ -3099,6 +4191,169 @@ function deleteProfile() {
   _renderProfileSelect();
 }
 _renderProfileSelect();
+
+// ─── FINANCE ──────────────────────────────────────────────────────────────
+let preApprovals = [];
+let editingPreId = null;
+
+function calcAffordability() {
+  const net = parseFloat(document.getElementById('calc-net').value) || 0;
+  const deposit = parseFloat(document.getElementById('calc-deposit').value) || 0;
+  const term = parseInt(document.getElementById('calc-term').value) || 60;
+  const rate = 12.5; // Average market rate for affordability calculation
+
+  const maxInstalment = net * 0.20; // 20% rule
+  
+  // Solve for Principal: P = (Instalment * (1 - (1 + r)^-n)) / r
+  const r = (rate / 100) / 12;
+  const n = term;
+  
+  const maxLoan = (maxInstalment * (1 - Math.pow(1 + r, -n))) / r;
+  const maxPrice = maxLoan + deposit;
+  const totalRepay = (maxInstalment * n) + deposit;
+
+  document.getElementById('res-max-price').textContent = fmt(Math.round(maxPrice));
+  document.getElementById('res-max-instalment').textContent = fmt(Math.round(maxInstalment));
+  document.getElementById('res-total-repay').textContent = fmt(Math.round(totalRepay));
+
+  // Also update comparison inputs for convenience
+  document.getElementById('comp-price').value = Math.round(maxPrice);
+  document.getElementById('comp-deposit').value = Math.round(deposit);
+  document.getElementById('comp-term').value = term;
+  renderBankComparison();
+}
+
+function renderBankComparison() {
+  const price = parseFloat(document.getElementById('comp-price').value) || 0;
+  const deposit = parseFloat(document.getElementById('comp-deposit').value) || 0;
+  const term = parseInt(document.getElementById('comp-term').value) || 60;
+  const loan = price - deposit;
+
+  const banks = [
+    { name: 'WesBank', rate: 11.75 },
+    { name: 'Absa', rate: 12.25 },
+    { name: 'Standard Bank', rate: 12.5 },
+    { name: 'Nedbank', rate: 12.75 },
+    { name: 'Capitec', rate: 13.5 }
+  ];
+
+  const tbody = document.getElementById('bank-comp-tbody');
+  tbody.innerHTML = '';
+
+  banks.forEach(b => {
+    const r = (b.rate / 100) / 12;
+    const n = term;
+    const inst = loan > 0 ? (loan * r) / (1 - Math.pow(1 + r, -n)) : 0;
+    const totalRepay = (inst * n) + deposit;
+    const totalInterest = totalRepay - price;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600">${b.name}</td>
+      <td>${b.rate}%</td>
+      <td style="color:var(--gold)">${fmt(Math.round(inst))}</td>
+      <td>${fmt(Math.round(totalRepay))}</td>
+      <td style="color:var(--muted)">${fmt(Math.round(totalInterest))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function openPreApprovalModal(id = null) {
+  editingPreId = id;
+  const modal = document.getElementById('pre-approval-modal');
+  modal.style.display = 'flex';
+  
+  if (id) {
+    const app = preApprovals.find(a => a.id === id);
+    document.getElementById('pre-title').textContent = 'Edit Pre-approval';
+    document.getElementById('pre-bank').value = app.bank_name;
+    document.getElementById('pre-date').value = app.date_applied;
+    document.getElementById('pre-status').value = app.status;
+    document.getElementById('pre-amount').value = app.amount;
+    document.getElementById('pre-rate').value = app.interest_rate;
+    document.getElementById('pre-instalment').value = app.monthly_instalment;
+    document.getElementById('pre-notes').value = app.notes || '';
+  } else {
+    document.getElementById('pre-title').textContent = 'Add Pre-approval';
+    document.getElementById('pre-bank').value = '';
+    document.getElementById('pre-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('pre-status').value = 'Pending';
+    document.getElementById('pre-amount').value = document.getElementById('comp-price').value;
+    document.getElementById('pre-rate').value = 11.75;
+    document.getElementById('pre-instalment').value = '';
+    document.getElementById('pre-notes').value = '';
+  }
+}
+
+function closePreApprovalModal() {
+  document.getElementById('pre-approval-modal').style.display = 'none';
+}
+
+async function savePreApproval() {
+  const data = {
+    bank_name: document.getElementById('pre-bank').value,
+    date_applied: document.getElementById('pre-date').value,
+    status: document.getElementById('pre-status').value,
+    amount: parseFloat(document.getElementById('pre-amount').value),
+    interest_rate: parseFloat(document.getElementById('pre-rate').value),
+    monthly_instalment: parseFloat(document.getElementById('pre-instalment').value),
+    notes: document.getElementById('pre-notes').value
+  };
+
+  const url = editingPreId ? `/api/finance/pre-approvals/${editingPreId}` : '/api/finance/pre-approvals';
+  const method = editingPreId ? 'PUT' : 'POST';
+
+  const res = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+
+  if (res.ok) {
+    closePreApprovalModal();
+    loadPreApprovals();
+  } else {
+    alert('Failed to save application.');
+  }
+}
+
+async function loadPreApprovals() {
+  const res = await fetch('/api/finance/pre-approvals');
+  preApprovals = await res.json();
+  const tbody = document.getElementById('pre-approval-tbody');
+  tbody.innerHTML = '';
+
+  if (preApprovals.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:40px; color:var(--dim)">No applications logged yet.</td></tr>';
+    return;
+  }
+
+  preApprovals.forEach(a => {
+    const statusClass = a.status.toLowerCase();
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:600">${a.bank_name}</td>
+      <td style="font-size:11px; color:var(--muted)">${a.date_applied}</td>
+      <td>${fmt(a.amount)}</td>
+      <td>${a.interest_rate}%</td>
+      <td style="color:var(--gold)">${fmt(a.monthly_instalment)}</td>
+      <td><span class="status-badge ${statusClass}">${a.status}</span></td>
+      <td style="font-size:11px; color:var(--muted); max-width:150px; overflow:hidden; text-overflow:ellipsis">${a.notes || ''}</td>
+      <td style="text-align:right">
+        <button class="action-btn" onclick="openPreApprovalModal(${a.id})">Edit</button>
+        <button class="action-btn" onclick="deletePreApproval(${a.id})" style="color:var(--red); border-color:transparent">✕</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function deletePreApproval(id) {
+  if (!confirm('Delete this application record?')) return;
+  const res = await fetch(`/api/finance/pre-approvals/${id}`, { method: 'DELETE' });
+  if (res.ok) loadPreApprovals();
+}
 
 // ─── INIT ──────────────────────────────────────────────────────────────────
 loadListings();

@@ -65,6 +65,28 @@ def init_db():
                 key   TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS pre_approvals (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                bank_name           TEXT NOT NULL,
+                date_applied        TEXT NOT NULL,
+                amount              REAL,
+                interest_rate       REAL,
+                monthly_instalment  REAL,
+                status              TEXT DEFAULT 'Pending',
+                notes               TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS counter_offers (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                listing_id      INTEGER NOT NULL,
+                date            TEXT NOT NULL,
+                my_offer        REAL,
+                dealer_counter  REAL,
+                notes           TEXT,
+                status          TEXT,
+                FOREIGN KEY (listing_id) REFERENCES listings (id)
+            );
         """)
         # Safely add columns if migrating an existing database
         try:
@@ -255,6 +277,9 @@ def get_price_changes() -> list[dict]:
         return [dict(r) for r in rows]
 
 
+        return [dict(r) for r in rows]
+
+
 def get_day_of_week_prices() -> list[dict]:
     """Avg price by day of week (0=Sun, 1=Mon, ..., 6=Sat) across all price history."""
     with get_conn() as conn:
@@ -266,6 +291,26 @@ def get_day_of_week_prices() -> list[dict]:
             FROM price_history
             GROUP BY dow
             ORDER BY dow ASC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_week_of_month_prices() -> list[dict]:
+    """Avg price by week of month (1, 2, 3, 4) based on day of month."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                CASE 
+                    WHEN CAST(strftime('%d', scraped_at) AS INTEGER) <= 7 THEN 1
+                    WHEN CAST(strftime('%d', scraped_at) AS INTEGER) <= 14 THEN 2
+                    WHEN CAST(strftime('%d', scraped_at) AS INTEGER) <= 21 THEN 3
+                    ELSE 4
+                END AS wom,
+                ROUND(AVG(price)) AS avg_price,
+                COUNT(*) AS count
+            FROM price_history
+            GROUP BY wom
+            ORDER BY wom ASC
         """).fetchall()
         return [dict(r) for r in rows]
 
@@ -449,6 +494,139 @@ def _trigger_mac_notification(title: str, msg: str):
         subprocess.run(cmd, check=False)
     except Exception:
         pass
+
+
+def get_pre_approvals() -> list[dict]:
+    """Fetch all bank pre-approval applications."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM pre_approvals ORDER BY date_applied DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def add_pre_approval(data: dict) -> int:
+    """Add a new bank pre-approval application."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """INSERT INTO pre_approvals (bank_name, date_applied, amount, interest_rate, monthly_instalment, status, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data.get("bank_name"),
+                data.get("date_applied"),
+                data.get("amount"),
+                data.get("interest_rate"),
+                data.get("monthly_instalment"),
+                data.get("status", "Pending"),
+                data.get("notes")
+            )
+        )
+        return cursor.lastrowid
+
+
+def update_pre_approval(app_id: int, data: dict) -> bool:
+    """Update an existing pre-approval application."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """UPDATE pre_approvals 
+               SET bank_name=?, date_applied=?, amount=?, interest_rate=?, monthly_instalment=?, status=?, notes=?
+               WHERE id=?""",
+            (
+                data.get("bank_name"),
+                data.get("date_applied"),
+                data.get("amount"),
+                data.get("interest_rate"),
+                data.get("monthly_instalment"),
+                data.get("status"),
+                data.get("notes"),
+                app_id
+            )
+        )
+        return cursor.rowcount > 0
+
+
+def get_sold_listings_with_estimates():
+    """Find inactive listings and estimate their sold price."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT 
+                l.*, 
+                (SELECT price FROM price_history ph WHERE ph.listing_id = l.id ORDER BY scraped_at DESC LIMIT 1) as last_price,
+                (SELECT COUNT(*) FROM price_history ph WHERE ph.listing_id = l.id AND ph.price < (SELECT price FROM price_history ph2 WHERE ph2.listing_id = ph.listing_id AND ph2.scraped_at < ph.scraped_at ORDER BY ph2.scraped_at DESC LIMIT 1)) as drop_count
+            FROM listings l
+            WHERE l.is_active = 0
+            ORDER BY l.last_seen DESC
+            LIMIT 50
+        """).fetchall()
+        
+        results = []
+        for r in rows:
+            d = dict(r)
+            # Days on Market
+            first = datetime.fromisoformat(d['first_seen'])
+            last = datetime.fromisoformat(d['last_seen'])
+            dom = max(1, (last - first).days)
+            
+            # Estimate Formula: Last Price * (1 - (Days on Market / 1000) - (Drops * 0.01))
+            # Capped at 10% discount
+            last_price = d['last_price'] or 0
+            drop_count = d['drop_count'] or 0
+            discount = min(0.10, (dom / 1000) + (drop_count * 0.01))
+            d['estimated_sold_price'] = round(last_price * (1 - discount))
+            d['dom'] = dom
+            results.append(d)
+        return results
+
+
+def get_variant_stats():
+    """Aggregate stats by variant."""
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT 
+                l.variant, 
+                ROUND(AVG(ph.price)) as avg_price,
+                COUNT(DISTINCT l.id) as count,
+                MIN(ph.price) as min_price,
+                MAX(ph.price) as max_price
+            FROM listings l
+            JOIN price_history ph ON l.id = ph.listing_id
+            WHERE l.is_active = 1 AND l.variant IS NOT NULL AND l.variant != ''
+            GROUP BY l.variant
+            HAVING count > 1
+            ORDER BY avg_price ASC
+        """).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_pre_approval(app_id: int) -> bool:
+    """Delete a pre-approval application."""
+    with get_conn() as conn:
+        cursor = conn.execute("DELETE FROM pre_approvals WHERE id=?", (app_id,))
+        return cursor.rowcount > 0
+
+
+# ─── COUNTER OFFERS ────────────────────────────────────────────────────────
+def get_counter_offers(listing_id: int):
+    """Fetch all counter offers for a specific listing."""
+    with get_conn() as conn:
+        cursor = conn.execute("SELECT * FROM counter_offers WHERE listing_id = ? ORDER BY date ASC, id ASC", (listing_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def add_counter_offer(listing_id, date, my_offer, dealer_counter, notes, status):
+    """Log a new offer or counter offer."""
+    with get_conn() as conn:
+        cursor = conn.execute("""
+            INSERT INTO counter_offers (listing_id, date, my_offer, dealer_counter, notes, status)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (listing_id, date, my_offer, dealer_counter, notes, status))
+        return cursor.lastrowid
+
+
+def delete_counter_offer(offer_id: int):
+    """Delete a specific offer entry."""
+    with get_conn() as conn:
+        cursor = conn.execute("DELETE FROM counter_offers WHERE id = ?", (offer_id,))
+        return cursor.rowcount > 0
+
 
 # Init on import
 init_db()
