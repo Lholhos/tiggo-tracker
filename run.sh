@@ -53,7 +53,13 @@ echo "  Installing Playwright Chromium (first run only)..."
 
 # Copy Python source files to local run dir (avoids OneDrive sync hanging)
 mkdir -p "$RUN_DIR"
-cp "$PROJECT_DIR/app.py" "$PROJECT_DIR/scraper.py" "$RUN_DIR/"
+cp "$PROJECT_DIR/app.py" "$PROJECT_DIR/scraper.py" "$PROJECT_DIR/sync_service.py" "$RUN_DIR/"
+if [ -f "$PROJECT_DIR/.env" ]; then
+    sed "s|^DB_PATH=.*|DB_PATH=$PROJECT_DIR/tracker.db|" "$PROJECT_DIR/.env" > "$RUN_DIR/.env"
+fi
+if [ -f "$PROJECT_DIR/serviceAccountKey.json" ]; then
+    cp "$PROJECT_DIR/serviceAccountKey.json" "$RUN_DIR/"
+fi
 
 # Write database.py with absolute DB path pointing back to project dir
 sed "s|DB_PATH = Path(__file__).parent / \"tracker.db\"|DB_PATH = Path(\"$PROJECT_DIR/tracker.db\")|" \

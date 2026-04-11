@@ -1,0 +1,1581 @@
+<!-- Deployed at: DEPLOY_TIMESTAMP -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealRadar · Price Intelligence · 2022-2024</title>
+<meta name="description" content="Live market data for Toyota Fortuner 2022-2024. Scraped and curated pricing intelligence — lowest prices, market trends, and deal scores.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- Microsoft Clarity -->
+<script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "wa586denka");
+</script>
+<style>
+:root {
+  --bg: #080b10;
+  --surface: #0d1117;
+  --surface2: #161b22;
+  --border: #21262d;
+  --border2: #30363d;
+  --gold: #d4a843;
+  --gold-dim: rgba(212,168,67,0.12);
+  --text: #e6edf3;
+  --muted: #7d8590;
+  --dim: #484f58;
+  --green: #3fb950;
+  --red: #f85149;
+  --blue: #58a6ff;
+  --yellow: #f1e05a;
+  --radius: 6px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.wordmark { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 700; color: var(--gold); letter-spacing: 3px; }
+.header-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+
+/* Banner */
+.banner {
+  background: var(--gold-dim);
+  border-bottom: 1px solid rgba(212,168,67,0.25);
+  padding: 10px 32px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 1px;
+}
+.banner span { color: var(--gold); }
+
+/* Stats bar */
+.statsbar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.stat {
+  flex: 1;
+  padding: 16px 24px;
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+.stat:last-child { border-right: none; }
+.stat-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 6px; }
+.stat-value { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 700; color: var(--text); }
+.stat-value.gold { color: var(--gold); }
+.stat-value.green { color: var(--green); }
+.stat-value.red { color: var(--red); }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--surface); overflow-x: auto; }
+.tab { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); padding: 12px 20px; cursor: pointer; border-bottom: 2px solid transparent; letter-spacing: 2px; text-transform: uppercase; transition: all 0.2s; white-space: nowrap; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+/* Main content */
+main { flex: 1; padding: 28px 32px; max-width: 1600px; width: 100%; margin: 0 auto; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Filters */
+.filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
+.filter-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+select, input[type=text], input[type=number] {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.2s;
+  min-width: 130px;
+}
+select:focus, input:focus { border-color: var(--gold); }
+.filter-count { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); margin-left: auto; }
+
+/* Table */
+.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  background: var(--surface2);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+thead th:hover { color: var(--text); }
+thead th.sorted { color: var(--gold); }
+tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; cursor: pointer; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr:last-child { border-bottom: none; }
+td { padding: 13px 16px; vertical-align: middle; white-space: nowrap; }
+.price { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 14px; }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  min-width: 36px;
+}
+.badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+.badge-yellow { background: rgba(212,168,67,0.15); color: var(--gold); }
+.badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+.vs-avg { font-size: 11px; }
+.vs-avg.below { color: var(--green); }
+.vs-avg.above { color: var(--red); }
+.location-tag { font-size: 11px; color: var(--muted); }
+.share-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 8px; font-size: 10px; font-family: 'IBM Plex Mono', monospace; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
+.share-btn:hover { border-color: var(--gold); color: var(--gold); }
+.thumb { width: 50px; height: 36px; border-radius: 4px; object-fit: cover; background: var(--surface2); border: 1px solid var(--border); }
+.price-drop { display: block; font-size: 10px; font-weight: 500; font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
+.price-drop.down { color: var(--green); }
+.price-drop.up { color: var(--muted); }
+
+/* Comparison Bar */
+.compare-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: var(--surface);
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 1000;
+}
+.compare-bar.show { transform: translateX(-50%) translateY(0); }
+.compare-btn { background: var(--gold); color: #000; border: none; padding: 8px 20px; border-radius: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 700; cursor: pointer; }
+.compare-count { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text); }
+
+/* Comparison Overlay */
+.compare-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 2000;
+  padding: 40px;
+  overflow-y: auto;
+}
+.compare-overlay.open { display: block; }
+.compare-grid { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 40px; }
+.compare-col { background: var(--surface); padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.compare-field { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.compare-val { font-size: 16px; font-weight: 600; }
+.compare-img { width: 100%; aspect-ratio: 16/10; border-radius: 6px; object-fit: cover; margin-bottom: 20px; background: var(--surface2); }
+
+/* Charts */
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; }
+.chart-title { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--gold); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; }
+.chart-wrap { position: relative; height: 260px; }
+@media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+
+/* Modal */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--gold);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 680px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 32px;
+  animation: slideUp 0.25s ease;
+}
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+.modal-title { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700; }
+.modal-close { background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; }
+.modal-close:hover { color: var(--text); }
+.modal-price { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 700; color: var(--gold); margin-bottom: 8px; }
+.modal-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 24px; }
+.modal-section-title { font-family: 'IBM Plex Mono', monospace; font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px; }
+.modal-chart-wrap { height: 200px; margin-bottom: 24px; }
+.view-link { display: inline-block; margin-top: 12px; color: var(--gold); font-size: 12px; font-family: 'IBM Plex Mono', monospace; text-decoration: none; border: 1px solid rgba(212,168,67,0.4); padding: 8px 16px; transition: background 0.2s; }
+.view-link:hover { background: var(--gold-dim); }
+
+/* Runs */
+.run-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 80px 80px 80px 80px;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  align-items: center;
+}
+.run-row:last-child { border-bottom: none; }
+.status-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+.status-dot.done { background: var(--green); }
+.status-dot.error { background: var(--red); }
+.status-dot.running { background: var(--gold); animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* Finance */
+.finance-grid {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.finance-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.finance-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--gold);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.finance-input-group { margin-bottom: 16px; }
+.finance-input-group label {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.finance-input-group input, .finance-input-group select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  outline: none;
+  border-radius: var(--radius);
+}
+.finance-result-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.finance-result-row:last-child { border-bottom: none; }
+.finance-result-label { font-size: 12px; color: var(--muted); }
+.finance-result-value { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; color: var(--text); }
+.finance-result-value.gold { color: var(--gold); }
+.finance-table th { font-size: 9px; }
+.finance-table td { font-size: 12px; font-family: 'IBM Plex Mono', monospace; }
+
+/* Loading */
+.loading { display: flex; align-items: center; justify-content: center; height: 200px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 13px; gap: 10px; }
+.spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Footer */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 20px 32px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .statsbar { flex-wrap: wrap; }
+  .stat { min-width: 50%; }
+  main { padding: 16px; }
+  .finance-grid { grid-template-columns: 1fr; }
+  .run-row { grid-template-columns: 1fr 60px 60px 60px 60px 60px; font-size: 10px; gap: 6px; }
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div>
+    <div class="wordmark">DEALRADAR</div>
+    <div class="header-sub">Price Intelligence · 2022-2024</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div id="last-updated" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted)"></div>
+    <a href="https://t.me/DealRadar_bot" target="_blank" rel="noopener noreferrer" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gold);text-decoration:none;border:1px solid rgba(212,168,67,0.3);padding:6px 12px;border-radius:4px">Telegram Bot</a>
+  </div>
+</header>
+
+<div class="banner"><span>Read-only view.</span> Data scraped and curated by the owner. Prices may vary.</div>
+
+<div class="statsbar">
+  <div class="stat"><div class="stat-label">Listings</div><div class="stat-value" id="stat-count">—</div></div>
+  <div class="stat"><div class="stat-label">Lowest</div><div class="stat-value green" id="stat-min">—</div></div>
+  <div class="stat"><div class="stat-label">Average</div><div class="stat-value gold" id="stat-avg">—</div></div>
+  <div class="stat"><div class="stat-label">Highest</div><div class="stat-value red" id="stat-max">—</div></div>
+  <div class="stat"><div class="stat-label">Last Scraped</div><div class="stat-value" id="stat-last" style="font-size:12px;color:var(--muted)">—</div></div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="listings">Listings</div>
+  <div class="tab" data-tab="dealers">Dealers</div>
+  <div class="tab" data-tab="charts">Charts</div>
+  <div class="tab" data-tab="price-changes">Price Changes</div>
+  <!-- Finance tab injected by admin unlock -->
+  <div class="tab" data-tab="runs">Scrape History</div>
+</div>
+
+<main>
+  <!-- LISTINGS TAB -->
+  <div id="tab-listings" class="tab-content active">
+    <div class="filters">
+      <div class="filter-group">
+        <div class="filter-label">Year</div>
+        <select id="f-year"><option value="">All Years</option></select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Location</div>
+        <select id="f-location"><option value="">All Locations</option></select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Status</div>
+        <select id="f-status">
+          <option value="active">Active</option>
+          <option value="all">All</option>
+          <option value="gone">Gone</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Sort</div>
+        <select id="f-sort">
+          <option value="price-asc">Price ↑</option>
+          <option value="price-desc">Price ↓</option>
+          <option value="score-desc">Score ↓</option>
+          <option value="mileage-asc">Mileage ↑</option>
+          <option value="year-desc">Year ↓</option>
+        </select>
+      </div>
+      <div class="filter-count" id="filter-count"></div>
+    </div>
+    <div class="table-wrap">
+      <div class="loading" id="listings-loading"><div class="spinner"></div>Loading listings…</div>
+      <table id="listings-table" style="display:none">
+        <thead>
+          <tr>
+            <th style="width:40px"></th>
+            <th style="width:60px">PIC</th>
+            <th>LISTING</th>
+            <th data-sort="price">Price</th>
+            <th data-sort="score">Score</th>
+            <th>vs Avg</th>
+            <th data-sort="mileage">Mileage</th>
+            <th data-sort="year">Year</th>
+            <th>Location</th>
+            <th>Dealer</th>
+            <th>Share</th>
+          </tr>
+        </thead>
+        <tbody id="listings-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- DEALERS TAB -->
+  <div id="tab-dealers" class="tab-content">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th>Dealer Name</th>
+            <th style="text-align:right">Active Inv.</th>
+            <th style="text-align:right">Price Drops</th>
+            <th style="text-align:right">Avg. Deviation</th>
+            <th style="text-align:center">Reputation Score</th>
+          </tr>
+        </thead>
+        <tbody id="dealers-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CHARTS TAB -->
+  <div id="tab-charts" class="tab-content">
+    <div class="chart-grid">
+      <!-- Seasonal Intelligence -->
+      <div class="chart-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:0">Seasonal Buy-Signals · Day of Week</div>
+          <div id="best-dow-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--green)"></div>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-dow"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:0">Seasonal Buy-Signals · Week of Month</div>
+          <div id="best-wom-badge" style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gold)"></div>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-wom"></canvas></div>
+      </div>
+
+      <!-- Variant Breakdown -->
+      <div class="chart-card" style="grid-column:1/-1">
+        <div class="chart-title">Variant Value Analysis · Avg Price by Trim/Spec</div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chart-variant"></canvas></div>
+      </div>
+
+      <!-- Historical + Forecast -->
+      <div class="chart-card" style="grid-column:1/-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:0">Historical Price Trend + 30-Day Forecast</div>
+          <div id="forecast-badge" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 10px;border-radius:3px;border:1px solid"></div>
+        </div>
+        <div class="chart-wrap" style="height:200px"><canvas id="chart-forecast"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Price vs Mileage · Current Listings</div>
+        <div class="chart-wrap"><canvas id="chart-scatter"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Price Distribution</div>
+        <div class="chart-wrap"><canvas id="chart-dist"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Listings by Year</div>
+        <div class="chart-wrap"><canvas id="chart-year"></canvas></div>
+      </div>
+      <div class="chart-card" style="grid-column:1/-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="chart-title" style="margin-bottom:0">Market Heat Map · Avg Price by Location</div>
+          <div id="heatmap-badge" style="display:none;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gold)"></div>
+        </div>
+        <div class="chart-wrap" style="height:140px"><canvas id="chart-heatmap"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Sold Listings Intelligence -->
+    <div style="background:var(--surface); border:1px solid var(--border); padding:24px; margin-top:24px">
+      <div class="chart-title" style="margin-bottom:16px; display:flex; align-items:center; gap:10px">
+        Sold Price Estimator
+        <span style="font-size:10px; color:var(--muted); font-weight:normal; text-transform:none; margin-left:auto">Likely sold based on inactivity. Estimates include DOM &amp; drop weighted factors.</span>
+      </div>
+      <div class="table-wrap">
+        <table class="finance-table" style="font-size:11px">
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>First Seen</th>
+              <th>Last Seen</th>
+              <th>Days</th>
+              <th>Last Listed</th>
+              <th>Drops</th>
+              <th style="color:var(--gold)">Est. Sold Price</th>
+            </tr>
+          </thead>
+          <tbody id="sold-tbody">
+            <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--dim)">Loading market exit signals...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRICE CHANGES TAB -->
+  <div id="tab-price-changes" class="tab-content">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:20px;margin-bottom:12px">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600;margin-bottom:12px">DAILY SUMMARY</div>
+      <div id="pc-daily" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px"></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600">ALL PRICE CHANGES — FULL HISTORY</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div id="pc-filter-badge" style="font-size:11px;color:var(--gold)"></div>
+          <div id="pc-summary" style="font-size:12px;color:var(--muted)"></div>
+        </div>
+      </div>
+      <div id="pc-list"><div style="color:var(--muted);font-size:12px;padding:20px 0">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- Finance tab content injected dynamically after admin auth -->
+
+  <!-- SCRAPE HISTORY TAB -->
+  <div id="tab-runs" class="tab-content">
+    <div style="background:var(--surface);border:1px solid var(--border);padding:20px">
+      <div class="run-row" style="font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600">
+        <div>STARTED</div><div>STATUS</div><div>FOUND</div><div>NEW</div><div>CHANGES</div><div>DURATION</div>
+      </div>
+      <div id="runs-list"><div style="color:var(--dim);font-family:monospace;font-size:12px;padding:20px 0">Loading runs…</div></div>
+    </div>
+  </div>
+</main>
+
+<!-- Price History Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modal-title">—</div>
+        <div class="modal-price" id="modal-price">—</div>
+        <div class="modal-meta" id="modal-meta"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-section-title">Price History</div>
+    <div class="modal-chart-wrap"><canvas id="modal-chart"></canvas></div>
+    <a id="modal-link" class="view-link" href="#" target="_blank" rel="noopener">View Listing ↗</a>
+  </div>
+</div>
+
+<footer>Built by Afika · Not affiliated with any dealer or listing platform · DealRadar Price Intelligence</footer>
+
+<!-- Comparison Tool UI -->
+<div class="compare-bar" id="compare-bar">
+  <div class="compare-count" id="compare-count">0 vehicles selected</div>
+  <button class="compare-btn" onclick="openComparison()">Compare Selected</button>
+  <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px" onclick="clearComparison()">Clear</button>
+</div>
+
+<div class="compare-overlay" id="compare-overlay">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:30px">
+    <div class="wordmark">VEHICLE COMPARISON</div>
+    <button class="modal-close" onclick="closeComparison()" style="background:var(--surface2);width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center">✕</button>
+  </div>
+  <div class="compare-grid" id="compare-grid"></div>
+</div>
+
+<script>
+// ── Firebase config ──────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey:    "AIzaSyCgJCTtOhUbiZoMZoqYmmEo0Vsn7kCW2C4",
+  authDomain: "dealradar-tiggo-tracker.firebaseapp.com",
+  projectId: "dealradar-tiggo-tracker",
+  appId:     "1:402219560846:web:206be02cf667dc1499bedf",
+};
+firebase.initializeApp(firebaseConfig);
+
+// ── App Check (reCAPTCHA v3 — invisible, free) ──────────────────────────────
+// To activate: 1) Enable App Check in Firebase Console → App Check
+//              2) Register reCAPTCHA v3 provider and get your site key
+//              3) Replace the placeholder below with your site key
+//              4) Enforce App Check on Firestore in Firebase Console
+const RECAPTCHA_SITE_KEY = '6Ldv17IsAAAAAAz_VPoPDgdxYn2kBMFKeqIZAyAd';
+if (RECAPTCHA_SITE_KEY !== 'RECAPTCHA_V3_SITE_KEY_PLACEHOLDER') {
+  firebase.appCheck().activate(
+    new firebase.appCheck.ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+    true // isTokenAutoRefreshEnabled
+  );
+}
+
+const db = firebase.firestore();
+db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function esc(str) {
+  if (str === null || str === undefined) return '—';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+function safeUrl(url, fallback) {
+  if (!url || typeof url !== 'string') return fallback || '#';
+  const trimmed = url.trim().toLowerCase();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return esc(url);
+  return fallback || '#';
+}
+const fmt = (n) => 'R ' + Number(n).toLocaleString('en-ZA');
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('en-ZA', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allListings = [], allHistory = {}, allSnapshots = [], allPriceChanges = [];
+let allDow = [], allWom = [], allSoldEstimates = [];
+let selectedForComparison = new Set();
+let currentSort = { key: 'price', dir: 'asc' };
+let modalChart = null;
+let chartsRendered = false;
+let pcFilterDate = null;
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    if (tab.dataset.tab === 'charts' && !chartsRendered) renderCharts();
+    if (tab.dataset.tab === 'dealers') renderDealers();
+    if (tab.dataset.tab === 'price-changes') renderPriceChanges();
+    if (tab.dataset.tab === 'runs') loadRuns();
+    if (tab.dataset.tab === 'finance' && typeof calcAffordability === 'function') { calcAffordability(); renderBankComparison(); }
+  });
+});
+
+['f-year','f-location','f-status'].forEach(id => {
+  document.getElementById(id).addEventListener('change', renderTable);
+});
+
+document.querySelectorAll('thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (currentSort.key === key) currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+    else { currentSort.key = key; currentSort.dir = 'asc'; }
+    renderTable();
+  });
+});
+
+// ── Load data ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  try {
+    const [listSnap, snapSnap, changeSnap] = await Promise.all([
+      db.collection('listings').limit(500).get(),
+      db.collection('market_snapshots').orderBy('date', 'asc').limit(100).get(),
+      db.collection('price_changes').orderBy('scraped_at', 'desc').limit(500).get(),
+    ]);
+
+    allListings = listSnap.docs.map(d => ({id: d.id, ...d.data()}));
+    allSnapshots = snapSnap.docs.map(d => d.data());
+    allPriceChanges = changeSnap.docs.map(d => d.data());
+
+    // Load seasonal data
+    const [dowSnap, womSnap, soldSnap] = await Promise.all([
+      db.collection('day_of_week_prices').orderBy('dow','asc').get(),
+      db.collection('week_of_month_prices').orderBy('wom','asc').get(),
+      db.collection('sold_estimates').limit(100).get(),
+    ]);
+    allDow = dowSnap.docs.map(d => d.data());
+    allWom = womSnap.docs.map(d => d.data());
+    allSoldEstimates = soldSnap.docs.map(d => d.data());
+
+    // Populate filters
+    const activeListings = allListings.filter(l => l.is_active === 1);
+    const years = [...new Set(allListings.map(l => l.year).filter(Boolean))].sort().reverse();
+    const locs  = [...new Set(allListings.map(l => l.location).filter(Boolean))].sort();
+    const ysel = document.getElementById('f-year');
+    const lsel = document.getElementById('f-location');
+    years.forEach(y => { const o = document.createElement('option'); o.value = y; o.textContent = y; ysel.appendChild(o); });
+    locs.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l; lsel.appendChild(o); });
+
+    // Stats bar (active only)
+    const prices = activeListings.map(l => l.price).filter(Boolean);
+    document.getElementById('stat-count').textContent = activeListings.length;
+    if (prices.length) {
+      document.getElementById('stat-min').textContent = fmt(Math.min(...prices));
+      const avgPrice = Math.round(prices.reduce((a,b)=>a+b,0)/prices.length);
+      document.getElementById('stat-avg').textContent = fmt(avgPrice);
+      document.getElementById('stat-max').textContent = fmt(Math.max(...prices));
+    }
+
+    if (allSnapshots.length) {
+      const last = allSnapshots[allSnapshots.length-1];
+      document.getElementById('stat-last').textContent = last.date || '—';
+    }
+
+    document.getElementById('listings-loading').style.display = 'none';
+    document.getElementById('listings-table').style.display = 'table';
+    renderTable();
+
+    const params = new URLSearchParams(location.search);
+    if (params.has('listing')) {
+      const id = params.get('listing');
+      const listing = allListings.find(l => l.id == id);
+      if (listing) openModal(listing);
+    }
+  } catch(err) {
+    document.getElementById('listings-loading').innerHTML = `<span style="color:var(--red)">Failed to load data: ${esc(err.message)}</span>`;
+  }
+}
+
+// ── Render Table ──────────────────────────────────────────────────────────────
+function renderTable() {
+  const yearF = document.getElementById('f-year').value;
+  const locF  = document.getElementById('f-location').value;
+  const statusF = document.getElementById('f-status').value;
+
+  let data = allListings.filter(l => {
+    if (yearF && l.year != yearF) return false;
+    if (locF && l.location != locF) return false;
+    if (statusF === 'active' && l.is_active !== 1) return false;
+    if (statusF === 'gone' && l.is_active !== 0) return false;
+    return true;
+  });
+
+  data.sort((a,b) => {
+    let v1 = a[currentSort.key] || 0;
+    let v2 = b[currentSort.key] || 0;
+    return currentSort.dir === 'asc' ? v1 - v2 : v2 - v1;
+  });
+
+  const activeListings = allListings.filter(l => l.is_active === 1);
+  const activePrices = activeListings.map(l => l.price).filter(Boolean);
+  const avgPrice = activePrices.length ? Math.round(activePrices.reduce((a,b)=>a+b,0)/activePrices.length) : 0;
+
+  document.querySelectorAll('thead th[data-sort]').forEach(th => {
+    th.classList.remove('sorted');
+    th.innerHTML = th.innerHTML.replace(/ [↑↓]/, '');
+    if (th.dataset.sort === currentSort.key) {
+      th.classList.add('sorted');
+      th.innerHTML += currentSort.dir === 'asc' ? ' ↑' : ' ↓';
+    }
+  });
+
+  document.getElementById('filter-count').textContent = `${data.length} listings`;
+
+  const tbody = document.getElementById('listings-body');
+  tbody.innerHTML = '';
+  data.forEach(l => {
+    const score = l.score || 0;
+    const bClass = score >= 70 ? 'badge-green' : score >= 45 ? 'badge-yellow' : 'badge-red';
+    let priceHTML = `<span class="price">${fmt(l.price)}</span>`;
+    if (l.price_diff) {
+      const cls = l.price_diff < 0 ? 'down' : 'up';
+      const arrow = l.price_diff < 0 ? '↓' : '↑';
+      priceHTML += `<span class="price-drop ${cls}">${arrow} ${fmt(Math.abs(l.price_diff))}</span>`;
+    }
+
+    const tr = document.createElement('tr');
+    if (l.is_active === 0) tr.style.opacity = '0.5';
+    tr.innerHTML = `
+      <td onclick="toggleComparison(event, '${l.id}')">
+        <input type="checkbox" ${selectedForComparison.has(l.id) ? 'checked' : ''}>
+      </td>
+      <td><img src="${safeUrl(l.image, 'https://via.placeholder.com/100x70?text=No+Img')}" class="thumb" loading="lazy"></td>
+      <td style="white-space:normal; min-width:180px; font-weight:500">${esc(l.title)}</td>
+      <td>${priceHTML}</td>
+      <td><span class="badge ${bClass}">${score}</span></td>
+      <td><span class="vs-avg ${l.price < avgPrice ? 'below' : 'above'}">${l.price && avgPrice ? Math.round(((l.price-avgPrice)/avgPrice)*100)+'%' : '—'}</span></td>
+      <td>${esc(l.mileage_raw || (l.mileage ? l.mileage.toLocaleString()+'km' : '—'))}</td>
+      <td>${esc(l.year)}</td>
+      <td><span class="location-tag">${esc(l.location)}</span></td>
+      <td style="color:var(--muted);font-size:12px">${esc(l.dealer)}</td>
+      <td><button class="share-btn" onclick="shareListing(event,'${l.id}')">Share ↗</button></td>`;
+    tr.addEventListener('click', (e) => {
+      if (e.target.tagName !== 'INPUT' && !e.target.classList.contains('share-btn')) openModal(l);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Dealers ───────────────────────────────────────────────────────────────────
+function renderDealers() {
+  const activeData = allListings.filter(l => l.is_active === 1);
+  const avgMktPrice = activeData.reduce((a, b) => a + (b.price || 0), 0) / (activeData.length || 1);
+
+  const dMap = {};
+  activeData.forEach(l => {
+    if (!l.dealer) return;
+    const key = l.dealer;
+    if (!dMap[key]) dMap[key] = { name: key, inv: 0, drops: 0, devSum: 0 };
+    dMap[key].inv++;
+    if (l.old_price && l.price < l.old_price) dMap[key].drops++;
+    if (l.price) {
+      const devPct = ((l.price - avgMktPrice) / avgMktPrice) * 100;
+      dMap[key].devSum += devPct;
+    }
+  });
+
+  let dealers = Object.values(dMap).map(d => {
+    d.avgDev = d.devSum / d.inv;
+    if (d.avgDev < -5) d.grade = 'A';
+    else if (d.avgDev <= 0) d.grade = 'B';
+    else if (d.avgDev <= 5) d.grade = 'C';
+    else d.grade = 'F';
+    return d;
+  }).filter(d => d.inv > 1).sort((a,b) => a.avgDev - b.avgDev);
+
+  const tbody = document.getElementById('dealers-tbody');
+  tbody.innerHTML = '';
+
+  if (dealers.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--dim);padding:30px">Not enough dealer data yet.</td></tr>';
+    return;
+  }
+
+  dealers.forEach((d, i) => {
+    let gradeColor = 'var(--text)';
+    if (d.grade === 'A') gradeColor = '#58a6ff';
+    if (d.grade === 'B') gradeColor = 'var(--green)';
+    if (d.grade === 'C') gradeColor = 'var(--gold)';
+    if (d.grade === 'F') gradeColor = 'var(--red)';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="color:var(--dim)">${i+1}</td>
+      <td style="font-weight:600;color:var(--text)">${esc(d.name)}</td>
+      <td style="text-align:right;color:var(--text)">${d.inv}</td>
+      <td style="text-align:right;color:var(--green)">${d.drops}</td>
+      <td style="text-align:right;color:${d.avgDev > 0 ? 'var(--red)' : 'var(--green)'}">${d.avgDev > 0 ? '+' : ''}${d.avgDev.toFixed(1)}%</td>
+      <td style="text-align:center;font-weight:900;font-size:18px;color:${gradeColor}">${d.grade}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Price Changes ─────────────────────────────────────────────────────────────
+function renderPriceChanges(filterDate) {
+  pcFilterDate = filterDate !== undefined ? filterDate : pcFilterDate;
+  const dailyEl = document.getElementById('pc-daily');
+  const sumEl = document.getElementById('pc-summary');
+  const badgeEl = document.getElementById('pc-filter-badge');
+  const el = document.getElementById('pc-list');
+
+  const changes = allPriceChanges;
+  if (!changes.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:20px 0">No price changes recorded yet.</div>';
+    sumEl.textContent = '';
+    dailyEl.innerHTML = '';
+    return;
+  }
+
+  // Build daily stats
+  const byDay = {};
+  changes.forEach(c => {
+    const date = c.scraped_at ? c.scraped_at.slice(0, 10) : null;
+    if (!date) return;
+    if (!byDay[date]) byDay[date] = { drops: 0, rises: 0, dropAmt: 0, riseAmt: 0, total: 0 };
+    const delta = c.new_price - c.old_price;
+    byDay[date].total++;
+    if (delta < 0) { byDay[date].drops++; byDay[date].dropAmt += Math.abs(delta); }
+    else { byDay[date].rises++; byDay[date].riseAmt += delta; }
+  });
+
+  // Render daily summary cards
+  dailyEl.innerHTML = '';
+  Object.keys(byDay).sort((a,b) => b.localeCompare(a)).forEach(date => {
+    const d = byDay[date];
+    const isActive = pcFilterDate === date;
+    const label = new Date(date + 'T12:00:00').toLocaleDateString('en-ZA', { weekday:'short', day:'numeric', month:'short' });
+    const card = document.createElement('div');
+    card.style.cssText = `background:${isActive ? 'var(--gold)' : 'var(--bg)'};border:1px solid ${isActive ? 'var(--gold)' : 'var(--border)'};padding:12px;cursor:pointer;border-radius:2px`;
+    card.innerHTML = `
+      <div style="font-size:10px;letter-spacing:1px;font-weight:700;color:${isActive ? '#000' : 'var(--muted)'};margin-bottom:6px">${label}</div>
+      <div style="font-size:18px;font-weight:700;color:${isActive ? '#000' : 'var(--text)'};margin-bottom:6px">${d.total} change${d.total !== 1 ? 's' : ''}</div>
+      <div style="display:flex;gap:8px;font-size:11px">
+        ${d.drops ? `<span style="color:${isActive ? '#000' : 'var(--green)'}">▼ ${d.drops} drop${d.drops !== 1 ? 's' : ''}</span>` : ''}
+        ${d.rises ? `<span style="color:${isActive ? '#000' : 'var(--red)'}">▲ ${d.rises} rise${d.rises !== 1 ? 's' : ''}</span>` : ''}
+      </div>`;
+    card.onclick = () => renderPriceChanges(isActive ? null : date);
+    dailyEl.appendChild(card);
+  });
+
+  // Filter
+  const filtered = pcFilterDate ? changes.filter(c => c.scraped_at && c.scraped_at.slice(0, 10) === pcFilterDate) : changes;
+  const drops = filtered.filter(c => c.new_price < c.old_price).length;
+  const rises = filtered.filter(c => c.new_price > c.old_price).length;
+  sumEl.textContent = `${filtered.length} changes · ${drops} drops · ${rises} rises`;
+  badgeEl.textContent = pcFilterDate ? `Filtered: ${new Date(pcFilterDate + 'T12:00:00').toLocaleDateString('en-ZA', {day:'numeric',month:'short',year:'numeric'})} · click card to clear` : '';
+
+  // Build list
+  let lastDate = null;
+  const rows = [];
+
+  filtered.forEach(c => {
+    const date = c.scraped_at ? c.scraped_at.slice(0, 10) : '';
+    if (date !== lastDate) {
+      lastDate = date;
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:10px;letter-spacing:2px;color:var(--muted);font-weight:600;padding:14px 0 6px 0;border-bottom:1px solid var(--border)';
+      d.textContent = date ? new Date(date + 'T12:00:00').toLocaleDateString('en-ZA', { weekday:'long', year:'numeric', month:'long', day:'numeric' }) : '';
+      rows.push(d);
+    }
+
+    const delta = c.new_price - c.old_price;
+    const pct = ((delta / c.old_price) * 100).toFixed(1);
+    const isDrop = delta < 0;
+    const colour = isDrop ? 'var(--green)' : 'var(--red)';
+    const arrow = isDrop ? '▼' : '▲';
+    const sign = isDrop ? '' : '+';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--border)';
+
+    const time = document.createElement('div');
+    time.style.cssText = 'font-family:monospace;font-size:11px;color:var(--muted);white-space:nowrap;width:48px;flex-shrink:0';
+    time.textContent = c.scraped_at ? c.scraped_at.slice(11, 16) : '';
+
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+    const titleEl = document.createElement('div');
+    titleEl.style.cssText = 'color:var(--text);font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    titleEl.textContent = c.title || '';
+    const meta = document.createElement('div');
+    meta.style.cssText = 'font-size:11px;color:var(--muted);margin-top:2px';
+    meta.textContent = c.variant || '';
+    info.appendChild(titleEl);
+    info.appendChild(meta);
+
+    const prices = document.createElement('div');
+    prices.style.cssText = 'text-align:center;white-space:nowrap;flex-shrink:0;width:150px';
+    const oldP = document.createElement('div');
+    oldP.style.cssText = 'font-size:11px;color:var(--muted);text-decoration:line-through';
+    oldP.textContent = 'R' + Number(c.old_price).toLocaleString();
+    const newP = document.createElement('div');
+    newP.style.cssText = 'font-size:14px;font-weight:700;color:var(--text)';
+    newP.textContent = 'R' + Number(c.new_price).toLocaleString();
+    prices.appendChild(oldP);
+    prices.appendChild(newP);
+
+    const badge = document.createElement('div');
+    badge.style.cssText = `font-size:13px;font-weight:700;color:${colour};white-space:nowrap;flex-shrink:0;width:140px;text-align:center`;
+    badge.textContent = `${arrow} ${sign}R${Math.abs(delta).toLocaleString()} (${sign}${pct}%)`;
+
+    row.appendChild(time);
+    row.appendChild(info);
+    row.appendChild(prices);
+    row.appendChild(badge);
+
+    // Click to open listing modal
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => {
+      const listing = allListings.find(l => l.id == c.listing_id);
+      if (listing) openModal(listing);
+    });
+
+    rows.push(row);
+  });
+
+  el.innerHTML = '';
+  rows.forEach(r => el.appendChild(r));
+}
+
+// ── Scrape Runs ───────────────────────────────────────────────────────────────
+async function loadRuns() {
+  try {
+    const snap = await db.collection('scrape_runs').orderBy('started_at', 'desc').limit(20).get();
+    const runs = snap.docs.map(d => d.data());
+    const el = document.getElementById('runs-list');
+
+    if (!runs.length) {
+      el.innerHTML = '<div style="color:var(--dim);font-family:monospace;font-size:12px;padding:20px 0">No runs yet</div>';
+      return;
+    }
+
+    el.innerHTML = runs.map(r => {
+      let dur = '—';
+      if (r.started_at && r.finished_at) {
+        const secs = Math.round((new Date(r.finished_at) - new Date(r.started_at)) / 1000);
+        dur = secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`;
+      } else if (r.status === 'running') {
+        dur = '⟳';
+      }
+      return `
+      <div class="run-row">
+        <div>${fmtDate(r.started_at)}</div>
+        <div><span class="status-dot ${esc(r.status)}"></span>${esc(r.status)}</div>
+        <div>${r.listings_found ?? '—'}</div>
+        <div style="color:var(--green)">${r.new_listings ?? '—'}</div>
+        <div style="color:var(--gold)">${r.price_changes ?? '—'}</div>
+        <div style="color:var(--muted)">${dur}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('runs-list').innerHTML = '<div style="color:var(--dim);font-size:12px;padding:20px 0">Could not load runs.</div>';
+  }
+}
+
+// ── Comparison ────────────────────────────────────────────────────────────────
+function toggleComparison(e, id) {
+  e.stopPropagation();
+  if (selectedForComparison.has(id)) selectedForComparison.delete(id);
+  else if (selectedForComparison.size < 4) selectedForComparison.add(id);
+  else alert('Max 4 vehicles for comparison');
+  updateCompareBar();
+  renderTable();
+}
+
+function updateCompareBar() {
+  const bar = document.getElementById('compare-bar');
+  const count = document.getElementById('compare-count');
+  if (selectedForComparison.size > 0) {
+    bar.classList.add('show');
+    count.textContent = `${selectedForComparison.size} vehicle${selectedForComparison.size > 1 ? 's' : ''} selected`;
+  } else {
+    bar.classList.remove('show');
+  }
+}
+
+function clearComparison() { selectedForComparison.clear(); updateCompareBar(); renderTable(); }
+
+function openComparison() {
+  const grid = document.getElementById('compare-grid');
+  grid.innerHTML = '';
+  const selected = allListings.filter(l => selectedForComparison.has(l.id));
+  grid.style.gridTemplateColumns = `repeat(${selected.length}, 1fr)`;
+  selected.forEach(l => {
+    const col = document.createElement('div');
+    col.className = 'compare-col';
+    col.innerHTML = `
+      <img src="${safeUrl(l.image, 'https://via.placeholder.com/400x250')}" class="compare-img">
+      <div><div class="compare-field">Model</div><div class="compare-val">${esc(l.title)}</div></div>
+      <div><div class="compare-field">Price</div><div class="compare-val" style="color:var(--gold)">${fmt(l.price)}</div></div>
+      <div><div class="compare-field">Mileage</div><div class="compare-val">${esc(l.mileage_raw || (l.mileage ? l.mileage.toLocaleString()+'km' : '—'))}</div></div>
+      <div><div class="compare-field">Year</div><div class="compare-val">${esc(l.year)}</div></div>
+      <div><div class="compare-field">Score</div><div class="compare-val">${l.score || '—'}</div></div>
+      <div><div class="compare-field">Dealer</div><div class="compare-val" style="font-size:12px;color:var(--muted)">${esc(l.dealer)}</div></div>
+      <a href="${safeUrl(l.url, '#')}" target="_blank" rel="noopener noreferrer" class="view-link" style="text-align:center">View Original</a>`;
+    grid.appendChild(col);
+  });
+  document.getElementById('compare-overlay').classList.add('open');
+}
+
+function closeComparison() { document.getElementById('compare-overlay').classList.remove('open'); }
+
+function shareListing(e, id) {
+  e.stopPropagation();
+  const url = `${location.origin}${location.pathname}?listing=${id}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = e.target;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Share ↗', 2000);
+  });
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+async function openModal(listing) {
+  const modal = document.getElementById('modal');
+  let img = modal.querySelector('.modal-img');
+  if (!img) {
+    img = document.createElement('img');
+    img.className = 'modal-img';
+    img.style.cssText = 'width:100%;height:300px;object-fit:cover;border-radius:6px;margin-bottom:20px';
+    modal.querySelector('.modal-header').after(img);
+  }
+  img.src = safeUrl(listing.image, 'https://via.placeholder.com/600x400?text=No+Listing+Image');
+
+  document.getElementById('modal-title').textContent = listing.title || 'Listing';
+  document.getElementById('modal-price').textContent = fmt(listing.price);
+  document.getElementById('modal-meta').innerHTML = [
+    listing.year && `<span>${esc(listing.year)}</span>`,
+    listing.mileage_raw && `<span>${esc(listing.mileage_raw)}</span>`,
+    listing.location && `<span>${esc(listing.location)}</span>`,
+    listing.dealer && `<span>${esc(listing.dealer)}</span>`,
+  ].filter(Boolean).join('<span style="color:var(--border)">·</span>');
+
+  document.getElementById('modal-link').href = safeUrl(listing.url, '#');
+  document.getElementById('modal-overlay').classList.add('open');
+  history.replaceState(null, '', `?listing=${listing.id}`);
+
+  if (!allHistory[listing.id]) {
+    try {
+      const lid = Number(listing.id);
+      const snap = await db.collection('price_history')
+        .where('listing_id', '==', lid)
+        .orderBy('scraped_at', 'asc')
+        .get();
+      allHistory[listing.id] = snap.docs.map(d => d.data());
+    } catch(e) {
+      allHistory[listing.id] = [];
+    }
+  }
+  renderModalChart(allHistory[listing.id] || []);
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  history.replaceState(null, '', location.pathname);
+}
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+function renderModalChart(history) {
+  const ctx = document.getElementById('modal-chart').getContext('2d');
+  if (modalChart) modalChart.destroy();
+  modalChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: history.map(h => h.scraped_at ? h.scraped_at.slice(0,10) : ''),
+      datasets: [{
+        data: history.map(h => h.price),
+        borderColor: '#d4a843',
+        backgroundColor: 'rgba(212,168,67,0.08)',
+        tension: 0.3,
+        pointRadius: 4,
+        pointBackgroundColor: '#d4a843',
+        fill: true,
+      }]
+    },
+    options: { ...chartDefaults(), plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } } }
+  });
+}
+
+// ── Admin-gated Finance ───────────────────────────────────────────────────────
+// Finance tab is NOT in the DOM. It's injected only after password verification.
+// SHA-256 hash comparison — password is never stored in plaintext in source.
+const _AH = 'f103f193e3048ef2b2b7e8d7c2bd2475d7c9b2a3207c1b5532fde5ca7abdbfd0';
+let _adminUnlocked = false;
+
+async function _hashPwd(pwd) {
+  const enc = new TextEncoder().encode(pwd);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// Triple-click logo to trigger admin prompt
+document.querySelector('.wordmark').addEventListener('click', function(e) {
+  if (e.detail === 3 && !_adminUnlocked) _promptAdmin();
+});
+
+// Also support ?admin URL param
+if (new URLSearchParams(location.search).has('admin') && !_adminUnlocked) {
+  setTimeout(_promptAdmin, 500);
+}
+
+async function _promptAdmin() {
+  const pwd = prompt('Admin access:');
+  if (!pwd) return;
+  const h = await _hashPwd(pwd);
+  if (h !== _AH) { alert('Denied.'); return; }
+  _adminUnlocked = true;
+  _injectFinance();
+}
+
+function _injectFinance() {
+  // 1. Add the tab button
+  const runsTab = document.querySelector('[data-tab="runs"]');
+  const finTab = document.createElement('div');
+  finTab.className = 'tab';
+  finTab.dataset.tab = 'finance';
+  finTab.textContent = 'Finance';
+  finTab.addEventListener('click', function() {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    finTab.classList.add('active');
+    document.getElementById('tab-finance').classList.add('active');
+    calcAffordability();
+    renderBankComparison();
+  });
+  runsTab.parentNode.insertBefore(finTab, runsTab);
+
+  // 2. Inject the tab content
+  const main = document.querySelector('main');
+  const div = document.createElement('div');
+  div.id = 'tab-finance';
+  div.className = 'tab-content';
+  div.innerHTML = `
+    <div class="finance-grid">
+      <div>
+        <div class="finance-card">
+          <div class="finance-title">Affordability Calculator</div>
+          <div class="finance-input-group"><label>Gross Monthly Salary (R)</label><input type="number" id="calc-gross" value="45000" oninput="calcAffordability()"></div>
+          <div class="finance-input-group"><label>Net Monthly Income (R)</label><input type="number" id="calc-net" value="32000" oninput="calcAffordability()"></div>
+          <div class="finance-input-group"><label>Suggested Deposit (R)</label><input type="number" id="calc-deposit" value="50000" oninput="calcAffordability()"></div>
+          <div class="finance-input-group"><label>Preferred Term (Months)</label>
+            <select id="calc-term" onchange="calcAffordability()"><option value="48">48 months</option><option value="60" selected>60 months</option><option value="72">72 months</option><option value="84">84 months</option></select>
+          </div>
+          <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--border2)">
+            <div class="finance-result-row"><div class="finance-result-label">Recommended Max Price</div><div class="finance-result-value gold" id="res-max-price">R0</div></div>
+            <div class="finance-result-row"><div class="finance-result-label">Max Monthly Instalment (20%)</div><div class="finance-result-value" id="res-max-instalment">R0</div></div>
+            <div class="finance-result-row"><div class="finance-result-label">Total Repayment Amount</div><div class="finance-result-value" id="res-total-repay">R0</div></div>
+          </div>
+          <div style="margin-top:16px;font-size:11px;color:var(--muted);font-style:italic">*Based on 20% of net income rule and average market rates.</div>
+        </div>
+        <div class="finance-card">
+          <div class="finance-title">Loan Comparison Settings</div>
+          <div class="finance-input-group"><label>Vehicle Price (R)</label><input type="number" id="comp-price" value="350000" oninput="renderBankComparison()"></div>
+          <div class="finance-input-group"><label>Deposit (R)</label><input type="number" id="comp-deposit" value="50000" oninput="renderBankComparison()"></div>
+          <div class="finance-input-group"><label>Loan Term (Months)</label>
+            <select id="comp-term" onchange="renderBankComparison()"><option value="48">48 months</option><option value="60" selected>60 months</option><option value="72">72 months</option><option value="84">84 months</option></select>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="finance-card">
+          <div class="finance-title">Bank Rate Comparison</div>
+          <div class="table-wrap"><table class="finance-table"><thead><tr><th>Bank</th><th>Interest Rate</th><th>Monthly Instalment</th><th>Total Repayment</th><th>Total Interest</th></tr></thead><tbody id="bank-comp-tbody"></tbody></table></div>
+          <div style="margin-top:16px;font-size:11px;color:var(--muted)">Average market rates pre-filled. Adjust inputs on the left for accuracy.</div>
+        </div>
+      </div>
+    </div>`;
+  main.appendChild(div);
+
+  // 3. Define the functions now that DOM elements exist
+  window.calcAffordability = function() {
+    const net = parseFloat(document.getElementById('calc-net').value) || 0;
+    const deposit = parseFloat(document.getElementById('calc-deposit').value) || 0;
+    const term = parseInt(document.getElementById('calc-term').value) || 60;
+    const rate = 12.5;
+    const maxInstalment = net * 0.20;
+    const r = (rate / 100) / 12;
+    const n = term;
+    const maxLoan = (maxInstalment * (1 - Math.pow(1 + r, -n))) / r;
+    const maxPrice = maxLoan + deposit;
+    const totalRepay = (maxInstalment * n) + deposit;
+    document.getElementById('res-max-price').textContent = fmt(Math.round(maxPrice));
+    document.getElementById('res-max-instalment').textContent = fmt(Math.round(maxInstalment));
+    document.getElementById('res-total-repay').textContent = fmt(Math.round(totalRepay));
+    document.getElementById('comp-price').value = Math.round(maxPrice);
+    document.getElementById('comp-deposit').value = Math.round(deposit);
+    document.getElementById('comp-term').value = term;
+    renderBankComparison();
+  };
+
+  window.renderBankComparison = function() {
+    const price = parseFloat(document.getElementById('comp-price').value) || 0;
+    const deposit = parseFloat(document.getElementById('comp-deposit').value) || 0;
+    const term = parseInt(document.getElementById('comp-term').value) || 60;
+    const loan = price - deposit;
+    const banks = [
+      { name: 'WesBank', rate: 11.75 },
+      { name: 'Absa', rate: 12.25 },
+      { name: 'Standard Bank', rate: 12.5 },
+      { name: 'Nedbank', rate: 12.75 },
+      { name: 'Capitec', rate: 13.5 }
+    ];
+    const tbody = document.getElementById('bank-comp-tbody');
+    tbody.innerHTML = '';
+    banks.forEach(b => {
+      const r = (b.rate / 100) / 12;
+      const n = term;
+      const inst = loan > 0 ? (loan * r) / (1 - Math.pow(1 + r, -n)) : 0;
+      const totalRepay = (inst * n) + deposit;
+      const totalInterest = totalRepay - price;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="font-weight:600">${b.name}</td><td>${b.rate}%</td><td style="color:var(--gold)">${fmt(Math.round(inst))}</td><td>${fmt(Math.round(totalRepay))}</td><td style="color:var(--muted)">${fmt(Math.round(totalInterest))}</td>`;
+      tbody.appendChild(tr);
+    });
+  };
+
+  // Auto-calculate on inject
+  calcAffordability();
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+function chartDefaults() {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    scales: {
+      x: { ticks: { color: '#7d8590', font: { family: 'IBM Plex Mono', size: 10 }, maxRotation: 45, maxTicksLimit: 8 }, grid: { color: '#21262d' } },
+      y: { ticks: { color: '#7d8590', font: { family: 'IBM Plex Mono', size: 10 }, callback: v => 'R'+Math.round(v/1000)+'k' }, grid: { color: '#21262d' } },
+    }
+  };
+}
+
+function renderCharts() {
+  chartsRendered = true;
+  const activeListings = allListings.filter(l => l.is_active === 1);
+
+  // Day-of-week chart
+  if (allDow.length) {
+    const dowLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dowPrices = allDow.map(d => d.avg_price);
+    const bestIdx = dowPrices.indexOf(Math.min(...dowPrices));
+    document.getElementById('best-dow-badge').textContent = `Best: ${dowLabels[bestIdx]}`;
+
+    new Chart(document.getElementById('chart-dow').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: dowLabels,
+        datasets: [{
+          data: dowPrices,
+          backgroundColor: dowPrices.map((p,i) => i === bestIdx ? 'rgba(63,185,80,0.6)' : 'rgba(212,168,67,0.35)'),
+          borderColor: dowPrices.map((p,i) => i === bestIdx ? '#3fb950' : '#d4a843'),
+          borderWidth: 1
+        }]
+      },
+      options: { ...chartDefaults(), plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } } }
+    });
+  }
+
+  // Week-of-month chart
+  if (allWom.length) {
+    const womLabels = allWom.map(d => 'Week ' + d.wom);
+    const womPrices = allWom.map(d => d.avg_price);
+    const bestWom = womPrices.indexOf(Math.min(...womPrices));
+    document.getElementById('best-wom-badge').textContent = `Best: Week ${allWom[bestWom].wom}`;
+
+    new Chart(document.getElementById('chart-wom').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: womLabels,
+        datasets: [{
+          data: womPrices,
+          backgroundColor: womPrices.map((p,i) => i === bestWom ? 'rgba(212,168,67,0.6)' : 'rgba(212,168,67,0.25)'),
+          borderColor: womPrices.map((p,i) => i === bestWom ? '#d4a843' : 'rgba(212,168,67,0.5)'),
+          borderWidth: 1
+        }]
+      },
+      options: { ...chartDefaults(), plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => fmt(c.parsed.y) } } } }
+    });
+  }
+
+  // Variant Analysis
+  const variantMap = {};
+  activeListings.forEach(l => {
+    if (!l.title) return;
+    const variant = l.title.replace(/\d{4}\s*/,'').split(' ').slice(0,3).join(' ');
+    if (!variantMap[variant]) variantMap[variant] = { total: 0, count: 0 };
+    variantMap[variant].total += l.price || 0;
+    variantMap[variant].count++;
+  });
+  const variants = Object.entries(variantMap).map(([v,d])=>({v, avg: Math.round(d.total/d.count)})).sort((a,b)=>a.avg-b.avg).slice(0,10);
+
+  new Chart(document.getElementById('chart-variant').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: variants.map(v=>v.v),
+      datasets: [{ data: variants.map(v=>v.avg), backgroundColor: 'rgba(212,168,67,0.55)', borderColor: '#d4a843', borderWidth: 1 }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10}, callback: v => 'R'+Math.round(v/1000)+'k' }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10} }, grid: { color: '#21262d' } },
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Avg: ${fmt(c.parsed.x)}` } } }
+    }
+  });
+
+  // Forecast chart (historical + linear regression)
+  const n = allSnapshots.length;
+  const forecast = [];
+  if (n >= 3) {
+    const xs = [...Array(n).keys()];
+    const ys = allSnapshots.map(s => s.avg_price);
+    const sumX = xs.reduce((a,b)=>a+b,0), sumY = ys.reduce((a,b)=>a+b,0);
+    const sumXY = xs.reduce((s,x,i)=>s+x*ys[i],0), sumXX = xs.reduce((s,x)=>s+x*x,0);
+    const denom = n*sumXX - sumX*sumX;
+    if (denom) {
+      const slope = (n*sumXY - sumX*sumY)/denom;
+      const intercept = (sumY - slope*sumX)/n;
+      const lastDate = new Date(allSnapshots[n-1].date);
+      for (let i=1;i<=30;i++) {
+        const d = new Date(lastDate); d.setDate(d.getDate()+i);
+        forecast.push({ date: d.toISOString().slice(0,10), price: Math.round(intercept + slope*(n-1+i)) });
+      }
+      // Forecast badge
+      const fb = document.getElementById('forecast-badge');
+      const dir = forecast[29].price < allSnapshots[n-1].avg_price;
+      fb.style.display = 'inline-block';
+      fb.style.color = dir ? 'var(--green)' : 'var(--red)';
+      fb.style.borderColor = dir ? 'var(--green)' : 'var(--red)';
+      fb.textContent = dir ? '↓ Trending down' : '↑ Trending up';
+    }
+  }
+
+  new Chart(document.getElementById('chart-forecast').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [...allSnapshots.map(s=>s.date), ...forecast.map(f=>f.date)],
+      datasets: [
+        { label: 'Avg', data: allSnapshots.map(s=>s.avg_price), borderColor: '#d4a843', backgroundColor: 'rgba(212,168,67,0.06)', fill: true, tension: 0.3 },
+        { label: 'Min', data: allSnapshots.map(s=>s.min_price), borderColor: '#3fb950', backgroundColor: 'transparent', tension: 0.3, borderDash: [4,4] },
+        { label: 'Max', data: allSnapshots.map(s=>s.max_price), borderColor: '#f85149', backgroundColor: 'transparent', tension: 0.3, borderDash: [4,4] },
+        { label: 'Forecast', data: [...Array(n).fill(null), ...forecast.map(f=>f.price)], borderColor: '#58a6ff', borderDash: [6,4], tension: 0.3 },
+      ]
+    },
+    options: { ...chartDefaults(), plugins: { legend: { labels: { color: '#7d8590', font: { family: 'IBM Plex Mono', size: 10 } } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}` } } } }
+  });
+
+  // Scatter: Price vs Mileage
+  new Chart(document.getElementById('chart-scatter').getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: 'Listing',
+        data: activeListings.filter(l=>l.mileage&&l.price).map(l=>({ x: l.mileage, y: l.price })),
+        backgroundColor: 'rgba(212,168,67,0.55)',
+        pointRadius: 5,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10}, callback: v => v/1000+'k km' }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10}, callback: v => 'R'+Math.round(v/1000)+'k' }, grid: { color: '#21262d' } },
+      },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${fmt(c.parsed.y)} · ${c.parsed.x.toLocaleString()}km` } } }
+    }
+  });
+
+  // Price Distribution
+  const distBins = {};
+  activeListings.forEach(l => {
+    if (!l.price) return;
+    const bin = Math.floor(l.price / 50000) * 50000;
+    const label = `R${bin/1000}k–${(bin+50000)/1000}k`;
+    distBins[label] = (distBins[label] || 0) + 1;
+  });
+  const distLabels = Object.keys(distBins).sort();
+  new Chart(document.getElementById('chart-dist').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: distLabels,
+      datasets: [{ data: distLabels.map(l => distBins[l]), backgroundColor: 'rgba(88,166,255,0.5)', borderColor: '#58a6ff', borderWidth: 1 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:9}, maxRotation: 45 }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10} }, grid: { color: '#21262d' } },
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  // Listings by Year
+  const yearBins = {};
+  activeListings.forEach(l => { if (l.year) yearBins[l.year] = (yearBins[l.year] || 0) + 1; });
+  const yearLabels = Object.keys(yearBins).sort();
+  new Chart(document.getElementById('chart-year').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: yearLabels,
+      datasets: [{ data: yearLabels.map(y => yearBins[y]), backgroundColor: 'rgba(212,168,67,0.5)', borderColor: '#d4a843', borderWidth: 1 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10} }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10} }, grid: { color: '#21262d' } },
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  // Market Heat Map (by Location)
+  const locMap = {};
+  activeListings.forEach(l => {
+    if (!l.location || !l.price) return;
+    if (!locMap[l.location]) locMap[l.location] = { total: 0, count: 0 };
+    locMap[l.location].total += l.price;
+    locMap[l.location].count++;
+  });
+  const locEntries = Object.entries(locMap).map(([loc, d]) => ({ loc, avg: Math.round(d.total/d.count) })).sort((a,b) => a.avg - b.avg);
+  if (locEntries.length) {
+    const minAvg = locEntries[0].avg, maxAvg = locEntries[locEntries.length-1].avg;
+    document.getElementById('heatmap-badge').style.display = 'inline-block';
+    document.getElementById('heatmap-badge').textContent = `Cheapest: ${locEntries[0].loc} · Most expensive: ${locEntries[locEntries.length-1].loc}`;
+
+    new Chart(document.getElementById('chart-heatmap').getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: locEntries.map(l => l.loc),
+        datasets: [{
+          data: locEntries.map(l => l.avg),
+          backgroundColor: locEntries.map(l => {
+            const t = maxAvg > minAvg ? (l.avg - minAvg) / (maxAvg - minAvg) : 0.5;
+            return `rgba(${Math.round(63 + t*185)}, ${Math.round(185 - t*104)}, ${Math.round(80 - t*7)}, 0.7)`;
+          }),
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:9}, maxRotation: 45 }, grid: { color: '#21262d' } },
+          y: { ticks: { color: '#7d8590', font:{family:'IBM Plex Mono',size:10}, callback: v => 'R'+Math.round(v/1000)+'k' }, grid: { color: '#21262d' } },
+        },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Avg: ${fmt(c.parsed.y)}` } } }
+      }
+    });
+  }
+
+  // Sold Price Estimator table
+  renderSoldEstimates();
+}
+
+function renderSoldEstimates() {
+  const tbody = document.getElementById('sold-tbody');
+  if (!allSoldEstimates.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--dim)">No sold estimates available yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  allSoldEstimates.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title)}</td>
+      <td style="color:var(--muted)">${s.first_seen ? s.first_seen.slice(0,10) : '—'}</td>
+      <td style="color:var(--muted)">${s.last_seen ? s.last_seen.slice(0,10) : '—'}</td>
+      <td>${s.dom || '—'}</td>
+      <td>${s.last_price ? fmt(s.last_price) : '—'}</td>
+      <td style="color:var(--green)">${s.drop_count || 0}</td>
+      <td style="color:var(--gold);font-weight:700">${s.estimated_sold_price ? fmt(s.estimated_sold_price) : '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>

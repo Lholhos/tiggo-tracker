@@ -1,14 +1,19 @@
 """
 Flask backend for the DealRadar price tracker.
-Runs on http://localhost:5000
+Runs on http://localhost:5001
 """
 
+import os
+import sys
 import threading
 import queue
 import time
 import schedule
 from functools import wraps
-from flask import Flask, jsonify, render_template_string, request, Response
+from dotenv import load_dotenv
+from flask import Flask, jsonify, render_template_string, request, Response, session, redirect, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from scraper import scrape, scrape_single_url
 from database import (
     upsert_listings,
@@ -38,27 +43,175 @@ from database import (
 )
 from playwright.sync_api import sync_playwright
 
+load_dotenv()
+
+# ── Startup validation ────────────────────────────────────────────────────────
+_REQUIRED_ENV = [
+    "DEALRADAR_PASSWORD",
+    "SESSION_SECRET",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "FIREBASE_API_KEY",
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_APP_ID",
+]
+_missing = [v for v in _REQUIRED_ENV if not os.environ.get(v)]
+if _missing:
+    print("\n[DealRadar] ERROR — Missing required environment variables:")
+    for v in _missing:
+        print(f"  ✗ {v}")
+    print("\nCopy .env.example → .env and fill in all values.\n")
+    sys.exit(1)
+
 app = Flask(__name__)
-app.secret_key = "dealradar-secret-x7r2-9v4k"
+app.secret_key = os.environ["SESSION_SECRET"]
+
+# -- Security Hardening --
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SECURE=False,  # Set to True if using HTTPS
+    SESSION_COOKIE_SAMESITE='Lax',
+)
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+)
 
 def require_auth(f):
+    """Session-based auth. Redirects to /login for browser, 403 for API."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Only require auth if a password is set in settings
-        password = get_setting("admin_password")
-        if not password:
+        if session.get("authenticated"):
             return f(*args, **kwargs)
-        
-        auth = request.authorization
-        if auth and auth.username == "admin" and auth.password == password:
-            return f(*args, **kwargs)
-        
-        return Response(
-            'Could not verify your access level for that URL.\n'
-            'You have to login with proper credentials (username: admin)', 401,
-            {'WWW-Authenticate': 'Basic realm="Login Required"'}
-        )
+        # API requests get 403; browser requests get a redirect
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Unauthorized"}), 403
+        return redirect(url_for("login"))
     return decorated
+
+def require_csrf(f):
+    """Simple CSRF protection for API state changes."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Check for X-Requested-With header (standard for fetch/XHR)
+        if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+            # Also allow if the Origin or Referer matches our own host
+            origin = request.headers.get("Origin")
+            if origin and request.host_url.strip('/') in origin:
+                 return f(*args, **kwargs)
+            return jsonify({"error": "CSRF suspect - Missing X-Requested-With header"}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ── Login / Logout ────────────────────────────────────────────────────────────
+_LOGIN_HTML = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DealRadar · Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #080b10;
+    color: #e6edf3;
+    font-family: 'IBM Plex Mono', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-top: 3px solid #d4a843;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 400px;
+  }
+  .logo { font-size: 22px; font-weight: 700; color: #d4a843; letter-spacing: 3px; margin-bottom: 8px; }
+  .subtitle { font-size: 11px; color: #7d8590; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 36px; }
+  label { font-size: 11px; color: #7d8590; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 8px; }
+  input {
+    width: 100%;
+    background: #080b10;
+    border: 1px solid #30363d;
+    color: #e6edf3;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus { border-color: #d4a843; }
+  button {
+    width: 100%;
+    background: #d4a843;
+    color: #080b10;
+    border: none;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 14px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  button:hover { opacity: 0.85; }
+  .error {
+    background: rgba(248,81,73,0.1);
+    border: 1px solid #f85149;
+    color: #f85149;
+    padding: 10px 14px;
+    font-size: 12px;
+    margin-bottom: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">DEALRADAR</div>
+  <div class="subtitle">Price Intelligence Dashboard</div>
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+  <form method="POST">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autofocus autocomplete="current-password">
+    <button type="submit">Enter Dashboard</button>
+  </form>
+</div>
+</body>
+</html>
+'''
+
+@app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
+def login():
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+    error = None
+    if request.method == "POST":
+        pwd = request.form.get("password", "")
+        if pwd == os.environ.get("DEALRADAR_PASSWORD", ""):
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        error = "Incorrect password. Try again."
+    return render_template_string(_LOGIN_HTML, error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 
 REPORT_HTML = """
 <!DOCTYPE html>
@@ -336,6 +489,9 @@ REPORT_HTML = """
 </html>
 """
 
+# Global scrape state
+_scrape_lock = threading.Lock()
+_scrape_status = {"running": False, "log": [], "run_id": None}
 
 def scheduled_job():
     with _scrape_lock:
@@ -381,12 +537,24 @@ def _do_scrape():
         stats["total"] = len(listings)
         finish_run(run_id, stats)
         log(f"✓ Done — {len(listings)} listings, {stats['new']} new, {stats['price_changes']} price changes")
+
+        # ── Firestore sync ────────────────────────────────────────────────────
+        try:
+            from sync_service import sync_to_firestore
+            log("Syncing to Firebase...")
+            sync_to_firestore(status_callback=log)
+            log("✓ Sync complete")
+        except Exception as sync_err:
+            log(f"⚠ Sync error (non-fatal): {sync_err}")
+        # ─────────────────────────────────────────────────────────────────────
+
     except Exception as e:
         error = str(e)
         log(f"✗ Error: {error}")
         finish_run(run_id, {"total": len(listings), "new": 0, "price_changes": 0}, error=error)
     finally:
         _scrape_status["running"] = False
+
 
 
 @app.route("/")
@@ -397,6 +565,8 @@ def index():
 
 @app.route("/api/scrape", methods=["POST"])
 @require_auth
+@require_csrf
+@limiter.limit("1 per minute")
 def trigger_scrape():
     with _scrape_lock:
         if _scrape_status["running"]:
@@ -411,6 +581,7 @@ def trigger_scrape():
 
 @app.route("/api/scrape/url", methods=["POST"])
 @require_auth
+@require_csrf
 def trigger_scrape_url():
     data = request.json or {}
     url = data.get("url", "").strip()
@@ -475,6 +646,7 @@ def listings():
 
 @app.route("/api/settings", methods=["GET", "POST"])
 @require_auth
+@require_csrf
 def settings_api():
     if request.method == "POST":
         data = request.json or {}
@@ -1436,6 +1608,7 @@ HTML = """<!DOCTYPE html>
     <span id="velocity-badge" class="header-badge" style="display:none;font-weight:bold"></span>
     <button class="icon-btn" id="compact-btn" onclick="toggleCompact()" title="Toggle compact view">⊟</button>
     <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark mode">☀</button>
+    <a href="/logout" style="background:#1c1f26;border:1px solid #30363d;color:#7d8590;font-family:inherit;font-size:11px;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;text-decoration:none;transition:color 0.2s,border-color 0.2s" onmouseover="this.style.color='#d4a843';this.style.borderColor='#d4a843'" onmouseout="this.style.color='#7d8590';this.style.borderColor='#30363d'">Logout</a>
   </div>
 </div>
 

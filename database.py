@@ -9,8 +9,12 @@ import subprocess
 import os
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv
 
-DB_PATH = Path(__file__).parent / "tracker.db"
+load_dotenv()
+
+_db_path_env = os.environ.get("DB_PATH", "tracker.db")
+DB_PATH = Path(_db_path_env) if os.path.isabs(_db_path_env) else Path(__file__).parent / _db_path_env
 
 
 def get_conn():
@@ -366,59 +370,35 @@ def get_recent_runs(n: int = 10) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-# Secrets are stored in .env for security, others in tracker.db
+# Secrets live in environment variables (loaded via dotenv), not the DB
 ENV_SECRETS = {"telegram_token", "telegram_chat_id", "admin_password"}
-ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 
-def _read_env():
-    """Simple parser for .env file."""
-    if not os.path.exists(ENV_FILE):
-        return {}
-    secrets = {}
-    try:
-        with open(ENV_FILE, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    secrets[k.strip()] = v.strip().strip('"').strip("'")
-    except Exception as e:
-        print(f"Error reading .env: {e}")
-    return secrets
-
-def _write_env(key, value):
-    """Write or update a key in .env file."""
-    secrets = _read_env()
-    secrets[key] = str(value)
-    try:
-        with open(ENV_FILE, "w") as f:
-            for k, v in secrets.items():
-                f.write(f"{k}={v}\n")
-    except Exception as e:
-        print(f"Error writing to .env: {e}")
+# Map DB setting keys → env variable names
+_ENV_KEY_MAP = {
+    "telegram_token": "TELEGRAM_BOT_TOKEN",
+    "telegram_chat_id": "TELEGRAM_CHAT_ID",
+    "admin_password": "DEALRADAR_PASSWORD",
+}
 
 
 def get_setting(key: str, default=None) -> str:
-    # Check .env first for secrets
+    """Read a setting. Secrets come from os.environ; others from SQLite."""
     if key in ENV_SECRETS:
-        env_val = _read_env().get(key)
+        env_var = _ENV_KEY_MAP.get(key, key.upper())
+        env_val = os.environ.get(env_var)
         if env_val is not None:
             return env_val
-            
+
     with get_conn() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         return row[0] if row else default
 
 
 def set_setting(key: str, value: str):
-    # Store secrets in .env
+    """Write a setting. Secrets now live in .env so we refuse to store them in DB."""
     if key in ENV_SECRETS:
-        _write_env(key, value)
-        # Also remove from DB if it exists there to avoid leaking
-        with get_conn() as conn:
-            conn.execute("DELETE FROM settings WHERE key=?", (key,))
+        # Secrets must be managed in .env manually; ignore writes to DB
+        print(f"[config] '{key}' is an env-secret — update .env directly")
         return
 
     with get_conn() as conn:

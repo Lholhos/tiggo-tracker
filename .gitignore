@@ -34,3 +34,11 @@ listings.db
 
 # macOS
 .DS_Store
+
+# Firebase
+serviceAccountKey.json
+.firebase/
+.firebaserc
+
+# Claude
+.claude/
