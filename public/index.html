@@ -1324,11 +1324,9 @@ window.addEventListener('resize', () => {
   }
 
   navBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (btn.id === 'bn-more-btn') { openSheet(); return; }
-      activateTab(btn.dataset.bnTab);
-    });
+    btn.addEventListener('click', () => activateTab(btn.dataset.bnTab));
   });
+  moreBtn.addEventListener('click', openSheet);
 
   sheetOverlay.addEventListener('click', (e) => {
     if (e.target === sheetOverlay) closeSheet();
